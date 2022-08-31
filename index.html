@@ -344,6 +344,14 @@
                 } else {
                     document.getElementsByClassName( "message-content" )[ 0 ].append( div );
                 }
+                var seen_messages = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                    if ( !seen_messages.includes( document.getElementsByClassName( "bubble" )[ i ].parentElement.classList[ 1 ] ) ) {
+                        seen_messages.push( document.getElementsByClassName( "bubble" )[ i ].parentElement.classList[ 1 ] )
+                    } else {
+                        document.getElementsByClassName( "bubble" )[ i ].parentElement.remove(); i = i - 1;
+                    } 
+                }
                 if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
                     document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
                     document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
@@ -489,6 +497,14 @@
                     }
                 } else {
                     document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                }
+                var seen_messages = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                    if ( !seen_messages.includes( document.getElementsByClassName( "bubble" )[ i ].parentElement.classList[ 1 ] ) ) {
+                        seen_messages.push( document.getElementsByClassName( "bubble" )[ i ].parentElement.classList[ 1 ] )
+                    } else {
+                        document.getElementsByClassName( "bubble" )[ i ].parentElement.remove(); i = i - 1;
+                    } 
                 }
                 if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
                     document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
