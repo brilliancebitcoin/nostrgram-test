@@ -559,12 +559,9 @@
             var sendable = JSON.stringify( openSubscription )
             socket.send( sendable );
             if ( document.getElementsByClassName( "active" )[ 0 ] ) {
-                console.log( [0] );
                 if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "channel-outer" ) ) {
-                    console.log( [1] );
                     var id = document.getElementsByClassName( "active" )[ 0 ].getAttribute( "data-id" );
                     setTimeout( function() {addMessages( id );}, 3000 );
-                    console.log( [2] );
                 }
                 if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "dm-outer" ) ) {
                     var pubkey = document.getElementsByClassName( "active" )[ 0 ].getAttribute( "data-pubkey" );
