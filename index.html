@@ -1995,6 +1995,7 @@
                     dms_info[ pubkey ][ "picture" ] = picture;
                 }
                 if ( !document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ] ) {
+                    console.log( "this one wasn't on the list:", document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ] );
                     document.getElementsByClassName( "channels" )[ 0 ].firstElementChild.innerHTML += displayDMbox( pubkey, name, picture );
                 }
             });
