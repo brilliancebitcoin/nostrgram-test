@@ -16,8 +16,8 @@
 <body>
     <!-- based on this: https://github.com/YunusEmreNalbant/css-chat-interface -->
     <script>
-        navigator.serviceWorker && navigator.serviceWorker.register( './sw.js ').then(function(registration) {
-            //console.log( 'Excellent, registered with scope: ', registration.scope);
+        navigator.serviceWorker && navigator.serviceWorker.register( './sw.js' ).then( function( registration ) {
+            //console.log( 'Excellent, registered with scope: ', registration.scope );
         });
     </script>
     <script>
@@ -146,7 +146,8 @@
         var existing_messages = [];
         var socket = new WebSocket( relay );
         var heartbeat = false;
-        socket.addEventListener('message', async function( message ) {
+
+        async function handleMessage( message ) {
             //heartbeat tests
             //console.log( "got a message!", message );
             heartbeat = true;
@@ -512,7 +513,9 @@
                     addPubkeyToSidebar( event.pubkey );
                 }
             }
-        })
+        }
+
+        socket.addEventListener( 'message', handleMessage );
 
         async function openConnection( e ) {
             if ( window.nostr ) {
@@ -522,7 +525,7 @@
             getUserMeta( pubKey );
             //heartbeat tests
             //console.log( "connected to " + relay );
-            heartbeat = true;
+            //heartbeat = true;
             addDmsToSidebar();
             var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
             var filter  = { "ids": subscribed_channels }
@@ -1020,10 +1023,21 @@
             setTimeout( function() {
                 if ( !heartbeat ) {
                     //heartbeat tests
-                    showToast( "the heartbeat function needed activation" );
+                    //showToast( "the heartbeat function needed activation" );
                     socket.removeEventListener( 'open', openConnection );
+                    socket.removeEventListener( 'message', handleMessage );
                     socket = new WebSocket( relay );
                     socket.addEventListener( 'open', openConnection );
+                    socket.addEventListener( 'message', handleMessage );
+                    if ( document.getElementsByClassName( "active" )[ 0 ] ) {
+                        if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "channel-outer" ) ) {
+                            var id = document.getElementsByClassName( "active" )[ 0 ].getAttribute( "data-id" );
+                            addMessages( id );
+                        } else if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "dm-outer" ) ) {
+                            var pubkey = document.getElementsByClassName( "active" )[ 0 ].getAttribute( "data-pubkey" );
+                            addClosedDecryptedMessages( pubkey );
+                        }
+                    }
                 }
             }, 2000 );
         }
