@@ -1020,7 +1020,7 @@
             setTimeout( function() {
                 if ( !heartbeat ) {
                     //heartbeat tests
-                    //showToast( "the heartbeat function needed activation" );
+                    showToast( "the heartbeat function needed activation" );
                     socket.removeEventListener( 'open', openConnection );
                     socket = new WebSocket( relay );
                     socket.addEventListener( 'open', openConnection );
