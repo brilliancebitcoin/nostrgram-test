@@ -1021,7 +1021,7 @@
                 socket.send(JSON.stringify( closer ));
             }, 1500 );
             setTimeout( function() {
-                if ( !heartbeat ) {
+                if ( !heartbeat && socket.readyState == 3 ) {
                     //heartbeat tests
                     //showToast( "the heartbeat function needed activation" );
                     socket.removeEventListener( 'open', openConnection );
@@ -1031,6 +1031,7 @@
                     socket.addEventListener( 'message', handleMessage );
                     if ( document.getElementsByClassName( "active" )[ 0 ] ) {
                         if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "channel-outer" ) ) {
+                            console.log( [1] );
                             var id = document.getElementsByClassName( "active" )[ 0 ].getAttribute( "data-id" );
                             addMessages( id );
                         } else if ( document.getElementsByClassName( "active" )[ 0 ].classList.contains( "dm-outer" ) ) {
