@@ -1,0 +1,2056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0"> -->
+    <meta name="viewport" content="width=device-width, user-scalable=no" />
+    <link rel="stylesheet" href="styles.css?v=32" />
+    <link rel="shortcut icon" type="image/png" href="favicon.png">
+    <link rel="manifest" href="manifest.json">
+    <title>Anigma</title>
+    <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
+    <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+    <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+</head>
+<body>
+    <!-- based on this: https://github.com/YunusEmreNalbant/css-chat-interface -->
+    <script>
+        navigator.serviceWorker && navigator.serviceWorker.register( './sw.js ').then(function(registration) {
+            //console.log( 'Excellent, registered with scope: ', registration.scope);
+        });
+    </script>
+    <script>
+        function bold( text ) {
+            var bold = /\*\*(.*?)\*\*/gm;
+            var html = text.replace( bold, '<strong>$1</strong>' );
+            return html;
+        }
+        function italicize( text ) {
+            var italicize = /\*(.*?)\*/gm;
+            var html = text.replace( italicize, '<span style="font-style: italic;">$1</span>' );
+            return html;
+        }
+        function triplebackticks( text ) {
+            var triplebackticks = /\`\`\`([\s\S]*?)\`\`\`/g;
+            var html = text.replace( triplebackticks, '<pre style="white-space: pre-wrap; padding: 5px; background-color: #999; font-size: 12px;">$1</pre>' );
+            return html;
+        }
+        function backticks( text ) {
+            var backticks = /\`(.*?)\`/gm;
+            var html = text.replace( backticks, '<pre style="display: inline; white-space: pre-wrap; padding: 5px; background-color: #999; font-size: 12px;">$1</pre>' );
+            return html;
+        }
+        function urlify( text, isMine ) {
+            var imgRegex = /\b(https?:\/\/\S+(?:png|jpe?g|gif|webp)\S*)\b/g;
+            var urlRegex = /(https?:\/\/[^\s]+)/g;
+            var returnable = "";
+            if ( !text.match( imgRegex ) ) {
+                returnable = text.replace( urlRegex, ( url ) => {
+                    return `<a href="${url}" target="_blank" rel="nofollow noopener" style="color: #4287f5;">${url}</a>`;
+                })                
+            }
+            if ( isMine && !text.match( imgRegex ) ) {
+                returnable = text.replace( urlRegex, ( url ) => {
+                    return `<a href="${url}" target="_blank" rel="nofollow noopener" style="color: white;">${url}</a>`;
+                })
+            }
+            if ( text.match( imgRegex ) ) {
+                returnable = text.replace( imgRegex, ( img ) => {
+                    return `<a href="${img}" target="_blank" rel="nofollow noopener"><img src="${img}" /></a>`;
+                })
+            }
+            return returnable;
+        }
+        function markdownify( text, isMine ) {
+            var returnable = urlify( text, isMine );
+            returnable = bold( returnable );
+            returnable = italicize( returnable );
+            returnable = triplebackticks( returnable );
+            returnable = backticks( returnable );
+            return returnable;
+        }
+    </script>
+    <script>
+        function leftJustifyImages() {
+            var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                if ( document.getElementsByClassName( "bubble" )[ i ].getElementsByTagName( "img" )[ 0 ] ) {
+                    var image = document.getElementsByClassName( "bubble" )[ i ].getElementsByTagName( "img" )[ 0 ];
+                    var isLoaded = image.complete && image.naturalHeight !== 0;
+                    if ( isLoaded ) {
+                        if ( document.getElementsByClassName( "bubble" )[ i ].getElementsByTagName( "img" )[ 0 ] && ( document.getElementsByClassName( "bubble" )[ i ].offsetWidth > ( window.innerWidth / 2 ) + 100 ) ) {
+                            document.getElementsByClassName( "bubble" )[ i ].parentElement.style.alignSelf = "flex-start";
+                        }
+                    }
+                }
+            }
+            setTimeout( leftJustifyImages, 3000 );
+        }
+    </script>
+    <script>
+        if ( window.location.href.includes( "brilliancebitcoin.github.io/nostrgram" ) && !window.location.href.includes( "brilliancebitcoin.github.io/nostrgram-test" ) ) {
+            window.location.href = "https://anigma.io/";
+        }
+        var { getSharedSecret, schnorr, utils } = nobleSecp256k1
+        var crypto  = window.crypto 
+        var getRand = size => crypto.getRandomValues(new Uint8Array(size))
+        var sha256  = bitcoinjs.crypto.sha256
+        if ( localStorage[ "backup" ] ) {
+            var backup = JSON.parse( localStorage[ "backup" ] );
+            var privKey = backup[ "privkey" ];
+            var pubKey = backup[ "pubkey" ];
+            var subscribed_channels = JSON.parse( backup[ "channels" ] );
+            var relay = JSON.parse( backup[ "relays" ] )[ 0 ];
+        } else {
+            var keypair = bitcoinjs.ECPair.makeRandom()
+            var privKey = keypair.privateKey.toString( "hex" )
+            var pubKey  = keypair.publicKey.toString( "hex" )
+            pubKey      = pubKey.substring( 2 )
+            var subscribed_channels = [ "f06a690997a1b7d8283c90a7224eb8b7fe96b7c3d3d8cc7b2e7f743532c02b42" ];
+            var relay = "wss://relay.damus.io";
+            var stuff_to_backup = {}
+            stuff_to_backup[ "privkey" ] = privKey;
+            stuff_to_backup[ "pubkey" ] = pubKey;
+            stuff_to_backup[ "channels" ] = JSON.stringify( subscribed_channels );
+            stuff_to_backup[ "relays" ] = JSON.stringify( [ relay ] );
+            localStorage[ "backup" ] = JSON.stringify( stuff_to_backup );
+        }
+        if ( localStorage[ "namemap" ] ) {
+            var namemap = JSON.parse( localStorage[ "namemap" ] );
+        } else {
+            var namemap = {}
+        }
+        if ( localStorage[ "imagemap" ] ) {
+            var imagemap = JSON.parse( localStorage[ "imagemap" ] );
+        } else {
+            var imagemap = {}
+        }
+        if ( localStorage[ "dms_info" ] ) {
+            var dms_info = JSON.parse( localStorage[ "dms_info" ] );
+        } else {
+            var dms_info = {}
+        }
+        if ( localStorage[ "msg_cache" ] ) {
+            var msg_cache = JSON.parse( localStorage[ "msg_cache" ] );
+        } else {
+            var msg_cache = {}
+            subscribed_channels.forEach( function( id ) {
+                msg_cache[ id ] = [];
+            });
+            Object.keys(dms_info).forEach( function( pubkey ) {
+                msg_cache[ pubkey ] = [];
+            });
+            localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+        }
+        var array_of_pubkeys = [];
+        var existing_messages = [];
+        var socket = new WebSocket( relay );
+        var heartbeat = false;
+        socket.addEventListener('message', async function( message ) {
+            //heartbeat tests
+            //console.log( "got a message!", message );
+            heartbeat = true;
+            var [ type, subId, event ] = JSON.parse( message.data );
+            var { kind, content } = event || {}
+/*
+            if ( subId.startsWith( "00000002" ) ) {
+                if ( content ) {
+                    console.log( "heartbeat event:", event );
+                }
+            }
+*/
+            if ( subId.startsWith( "00000001" ) ) {
+                if ( content && !checkForUserMetaErrors( content ) ) {
+                    if ( event.pubkey == pubKey ) {
+                        var myMetaInfo = {}
+                        if ( "name" in JSON.parse( content ) ) {
+                            myMetaInfo[ "name" ] = JSON.parse( content )[ "name" ];
+                            if ( document.getElementsByClassName( "display-name" )[ 0 ] ) {
+                                document.getElementsByClassName( "display-name" )[ 0 ].value = JSON.parse( content )[ "name" ];
+                            }
+                        }
+                        if ( "about" in JSON.parse( content ) ) {
+                            myMetaInfo[ "about" ] = JSON.parse( content )[ "about" ];
+                            if ( document.getElementsByClassName( "about-input" )[ 0 ] ) {
+                                document.getElementsByClassName( "about-input" )[ 0 ].value = JSON.parse( content )[ "about" ];
+                            }
+                        }
+                        if ( "picture" in JSON.parse( content ) ) {
+                            myMetaInfo[ "picture" ] = JSON.parse( content )[ "picture" ];
+                            if ( document.getElementsByClassName( "user-picture" )[ 0 ] ) {
+                                document.getElementsByClassName( "user-picture" )[ 0 ].value = JSON.parse( content )[ "picture" ];
+                            }
+                        }
+                        localStorage[ "my-meta-info" ] = JSON.stringify( myMetaInfo );
+                    }
+                    if ( "name" in JSON.parse( content ) && !( !JSON.parse( content )[ "name" ] || JSON.parse( content )[ "name" ] == "" ) ) {
+                        namemap[ event.pubkey ] = JSON.parse( content )[ "name" ];
+                        localStorage[ "namemap" ] = JSON.stringify( namemap );
+                        var i; for ( i=0; i<document.getElementsByClassName( event.pubkey ).length; i++ ) {
+                            document.getElementsByClassName( event.pubkey )[ i ].innerText = JSON.parse( content )[ "name" ];
+                        }
+                    } else {
+                        namemap[ event.pubkey ] = "none";
+                        localStorage[ "namemap" ] = JSON.stringify( namemap );
+                    }
+                    if ( "picture" in JSON.parse( content ) && !( !JSON.parse( content )[ "picture" ] || JSON.parse( content )[ "picture" ] == "" ) ) {
+                        imagemap[ event.pubkey ] = JSON.parse( content )[ "picture" ];
+                        localStorage[ "imagemap" ] = JSON.stringify( imagemap );
+                        var i; for ( i=0; i<document.getElementsByClassName( event.pubkey ).length; i++ ) {
+                            document.getElementsByClassName( event.pubkey )[ i ].parentElement.parentElement.getElementsByClassName( "picture" )[ 0 ].style.backgroundImage = "url(" + JSON.parse( content )[ "picture" ] + ")";
+                        }
+                    } else {
+                        imagemap[ event.pubkey ] = "none";
+                        localStorage[ "imagemap" ] = JSON.stringify( imagemap );
+                    }
+                } else if ( content && checkForUserMetaErrors( content ) ) {
+                    namemap[ event.pubkey ] = "none";
+                    localStorage[ "namemap" ] = JSON.stringify( namemap );
+                    imagemap[ event.pubkey ] = "none";
+                    localStorage[ "imagemap" ] = JSON.stringify( imagemap );
+                }
+                var closer = [ "CLOSE", subId ];
+                socket.send(JSON.stringify( closer ));
+            }
+            if ( kind && subId.startsWith( "00000000" ) ) {
+                if ( kind != 40 ) {
+                    showToast( "unknown error, could not add this channel -- please contact a developer for help" );
+                }
+                var isError = checkForChannelSubscriptionErrors( content );
+                if ( isError ) {
+                    showToast( "unknown error, could not add this channel -- please contact a developer for help" );
+                } else {
+                    document.getElementsByClassName( "removable-channels" )[ 0 ].innerHTML += `
+                            <div class="removable-channel ${event.id}">
+                                <span class="x-circle" onclick="removeChannel( '${event.id}' )">&times;</span>
+                                <span class="img-circle" style="background-image: url(${JSON.parse( content )[ "picture" ]})"></span>
+                                <span class="removable-channel-name">${JSON.parse( content )[ "name" ]}</span>
+                                <div style="clear: both"></div>
+                            </div>
+                    `;
+                }
+            }
+            if ( kind == 40 ) {
+                var isError = checkForChannelSubscriptionErrors( content );
+                if ( isError ) {
+                    showToast( "unknown error, could not add this channel -- please contact a developer for help" );
+                } else {
+                    var i; for ( i=0; i<document.getElementsByClassName( "dm-outer" ).length; i++ ) {
+                        document.getElementsByClassName( "dm-outer" )[ i ].remove();
+                        i = i - 1;
+                    }
+                    document.getElementsByClassName( "channels" )[ 0 ].firstElementChild.innerHTML += displayChannel( JSON.parse( content )[ "picture" ], JSON.parse( content )[ "name" ], "", event.id, event.created_at );
+                    getLatestMessage( event.id );
+                    addDmsToSidebar();
+                    var channel = document.getElementsByClassName( "channels" )[ 0 ].getElementsByClassName( event.id )[ 0 ];
+                    if ( subId.startsWith( "00000000" ) ) {
+                        selectChannel( channel );
+                    }
+                }
+                var closer = [ "CLOSE", subId ];
+                socket.send(JSON.stringify( closer ));
+            }
+            if ( kind == 42 && subId.includes( "add-messages" ) ) {
+                if ( document.getElementsByClassName( event.id )[ 0 ] ) return
+                var isMine = ( event.pubkey == pubKey );
+                if ( !isMine && !array_of_pubkeys.includes( event.pubkey ) ) {
+                    array_of_pubkeys.push( event.pubkey );
+                }
+                var now = Math.floor( Date.now() / 1000 )
+                var event_time = event.created_at
+                var how_long_ago = convertHMS( now - event_time )
+                var parent = "";
+                var i; for ( i=0; i<event.tags.length; i++ ) {
+                    if ( event[ "tags" ][ i ][ 0 ] == "e" && ( !parent || parent == "" ) ) {
+                        parent = event[ "tags" ][ i ][ 1 ];
+                    }
+                }
+                if ( !document.getElementsByClassName( parent )[ 0 ].classList.contains( "active" ) ) return
+                var color = "";
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "e" || event.pubkey.substring( 0, 1 ) == "f" ) ) {
+                    color = "red";
+                }
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "c" || event.pubkey.substring( 0, 1 ) == "d" ) ) {
+                    color = "pink";
+                };
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "a" || event.pubkey.substring( 0, 1 ) == "b" ) ) {
+                    color = "orange";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 10 ) {
+                    color = "yellow";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 8 ) {
+                    color = "green";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 6 ) {
+                    color = "lightblue";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 4 ) {
+                    color = "blue";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 2 ) {
+                    color = "purple";
+                };
+                var name = event.pubkey.substring( 0, 15 ) + "...";
+                //var picture = "https://hashvatar.vercel.app/" + event.pubkey;
+                var picture = "https://www.gravatar.com/avatar/" + event.pubkey + "?s=128&d=retro";
+                if ( event.pubkey in namemap && namemap[ event.pubkey ] != "none" ) {
+                    name = namemap[ event.pubkey ];
+                }
+                if ( event.pubkey in imagemap && imagemap[ event.pubkey ] != "none" ) {
+                    picture = imagemap[ event.pubkey ];
+                }
+                content = content.replace( /&/g, "&#38;" ).replace( /</g, "&lt;" ).replace( />/g, "&gt;" );
+                content = markdownify( content, isMine );
+                var div = document.createElement( "div" );
+                div.classList.add( "message" );
+                div.classList.add( event.id );
+                msg_cache[ parent ].forEach( function( message ) {
+                    existing_messages.push( Object.keys( message ) [ 0 ] )
+                });
+                addMessageToCache( event.pubkey, event.id, event_time, parent, color, name, picture, content );
+                if ( isMine ) {
+                    div.setAttribute( "data-author", event.pubkey );
+                    div.classList.add( "me" );
+                    var html = `<div class="bubble">${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>`;
+                    div.innerHTML = html;
+                } else {
+                    var html = `
+                        <span class="picture" style="background-image: url(${picture})" onclick="showProfile( '${event.pubkey}', '${name}', '${picture}' )"></span>
+                        <div class="bubble"><div class="author ${color} ${event.pubkey}">${name}</div>${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>
+                    `;
+                    div.innerHTML = html;
+                }
+                if ( now - event_time > 15 ) {
+                    if ( existing_messages.includes( event.id ) ) {
+                        document.getElementsByClassName( "message-content" )[ 0 ].prepend( div );
+                    } else {
+                        document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                        var last_200_messages = [];
+                        var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                            last_200_messages.push( document.getElementsByClassName( "bubble" )[ i ].parentElement );
+                        }
+                        last_200_messages.sort(function( a, b ) {return b.getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) - a.getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" )});
+                        var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                            document.getElementsByClassName( "bubble" )[ i ].parentElement.remove();
+                            i = i - 1;
+                        }
+                        last_200_messages.reverse();
+                        last_200_messages.forEach( function( item ) {
+                            document.getElementsByClassName( "message-content" )[ 0 ].append( item );
+                        });
+                    }
+                } else {
+                    document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                }
+                if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( window.innerWidth < 601 && Number( document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( Number( document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestring", how_long_ago );
+                }
+                document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;
+                if ( document.getElementsByClassName( "bubble" ).length > 0 ) {
+                    document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();
+                }
+            }
+            if ( kind == 42 && subId.includes( "latest-message" ) ) {
+                var now = Math.floor( Date.now() / 1000 )
+                var event_time = event.created_at
+                var how_long_ago = convertHMS( now - event_time )
+                var parent = "";
+                var i; for ( i=0; i<event.tags.length; i++ ) {
+                    if ( event[ "tags" ][ i ][ 0 ] == "e" && ( !parent || parent == "" ) ) {
+                        parent = event[ "tags" ][ i ][ 1 ];
+                    }
+                }
+                var shortened_content = content.replace( /\n/g, " " ).substring( 0, 50 );
+                if ( content.length > 50 ) {
+                    shortened_content = shortened_content + "...";
+                }
+                document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].innerText = shortened_content;
+                if ( Number( document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestring", how_long_ago )
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestamp", event_time )
+                }
+            }
+            //this code is for "closed dms" where you only see someone's dms if you first add them to your sidebar
+            if ( kind === 4 && subId.includes( "encrypted-dms" ) ) {
+                if ( document.getElementsByClassName( event.id )[ 0 ] ) return
+                var isMine = ( event.pubkey == pubKey );
+                if ( !isMine && !array_of_pubkeys.includes( event.pubkey ) ) {
+                    array_of_pubkeys.push( event.pubkey );
+                }
+                var now = Math.floor( Date.now() / 1000 )
+                var event_time = event.created_at
+                var how_long_ago = convertHMS( now - event_time )
+                if ( event.pubkey == pubKey ) {
+                    var otherKey = "";
+                    var i; for ( i=0; i<event.tags.length; i++ ) {
+                        if ( event[ "tags" ][ i ][ 0 ] == "p" && ( !otherKey || otherKey == "" ) ) {
+                            otherKey = event[ "tags" ][ i ][ 1 ];
+                        } else {
+                            otherKey = event.pubkey;
+                        }
+                    }
+                } else {
+                    otherKey = event.pubkey;
+                }
+                if ( window.nostr ) {
+                    content = await window.nostr.nip04.decrypt( otherKey, content );
+                } else {
+                    content = await decrypt(privKey, otherKey, content)
+                }
+                if ( !document.getElementsByClassName( otherKey.substring( 0, 20 ) )[ 0 ].classList.contains( "active" ) ) return
+                var color = "";
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "e" || event.pubkey.substring( 0, 1 ) == "f" ) ) {
+                    color = "red";
+                }
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "c" || event.pubkey.substring( 0, 1 ) == "d" ) ) {
+                    color = "pink";
+                };
+                if ( isNaN( event.pubkey.substring( 0, 1 ) ) && ( event.pubkey.substring( 0, 1 ) == "a" || event.pubkey.substring( 0, 1 ) == "b" ) ) {
+                    color = "orange";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 10 ) {
+                    color = "yellow";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 8 ) {
+                    color = "green";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 6 ) {
+                    color = "lightblue";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 4 ) {
+                    color = "blue";
+                };
+                if ( !isNaN( event.pubkey.substring( 0, 1 ) ) && event.pubkey.substring( 0, 1 ) < 2 ) {
+                    color = "purple";
+                };
+                var name = event.pubkey.substring( 0, 15 ) + "...";
+                //var picture = "https://hashvatar.vercel.app/" + event.pubkey;
+                var picture = "https://www.gravatar.com/avatar/" + event.pubkey + "?s=128&d=retro";
+                if ( event.pubkey in namemap && namemap[ event.pubkey ] != "none" ) {
+                    name = namemap[ event.pubkey ];
+                }
+                if ( event.pubkey in imagemap && imagemap[ event.pubkey ] != "none" ) {
+                    picture = imagemap[ event.pubkey ];
+                }
+                content = content.replace( /&/g, "&#38;" ).replace( /</g, "&lt;" ).replace( />/g, "&gt;" );
+                content = markdownify( content, isMine );
+                var div = document.createElement( "div" );
+                div.classList.add( "message" );
+                div.classList.add( event.id );
+                var parent = otherKey;
+                if ( !msg_cache[ parent ] ) {
+                    msg_cache[ parent ] = [];
+                }
+                msg_cache[ parent ].forEach( function( message ) {
+                    existing_messages.push( Object.keys( message ) [ 0 ] )
+                });
+                addMessageToCache( event.pubkey, event.id, event_time, parent, color, name, picture, content );
+                if ( isMine ) {
+                    div.setAttribute( "data-author", event.pubkey );
+                    div.classList.add( "me" );
+                    var html = `<div class="bubble">${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>`;
+                    div.innerHTML = html;
+                } else {
+                    var html = `
+                        <span class="picture" style="background-image: url(${picture})" onclick="showProfile( '${event.pubkey}', '${name}', '${picture}' )"></span>
+                        <div class="bubble"><div class="author ${color} ${event.pubkey}">${name}</div>${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>
+                    `;
+                    div.innerHTML = html;
+                }
+                if ( now - event_time > 15 ) {
+                    if ( existing_messages.includes( event.id ) ) {
+                        document.getElementsByClassName( "message-content" )[ 0 ].prepend( div );
+                    } else {
+                        document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                        var last_200_messages = [];
+                        var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                            last_200_messages.push( document.getElementsByClassName( "bubble" )[ i ].parentElement );
+                        }
+                        last_200_messages.sort(function( a, b ) {return b.getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) - a.getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" )});
+                        var i; for ( i=0; i<document.getElementsByClassName( "bubble" ).length; i++ ) {
+                            document.getElementsByClassName( "bubble" )[ i ].parentElement.remove();
+                            i = i - 1;
+                        }
+                        last_200_messages.reverse();
+                        last_200_messages.forEach( function( item ) {
+                            document.getElementsByClassName( "message-content" )[ 0 ].append( item );
+                        });
+                    }
+                } else {
+                    document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                }
+                if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( window.innerWidth < 601 && Number( document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( Number( document.getElementsByClassName( otherKey.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( otherKey.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( otherKey.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestring", how_long_ago );
+                }
+                document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;
+                if ( document.getElementsByClassName( "bubble" ).length > 0 ) {
+                    document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();
+                }
+            }
+            if ( kind === 4 && subId.includes( "encrypted-open-dms" ) ) {
+                var thereAreEncryptionErrors = await checkForEncryptionErrors( privKey, event.pubkey, event[ "content" ] );
+                if ( !document.getElementsByClassName( event.pubkey.substring( 0, 20 ) )[ 0 ] && !thereAreEncryptionErrors ) {
+                    addPubkeyToSidebar( event.pubkey );
+                }
+            }
+        })
+
+        async function openConnection( e ) {
+            if ( window.nostr ) {
+                pubKey = await window.nostr.getPublicKey();
+                privKey = "";
+            }
+            getUserMeta( pubKey );
+            //heartbeat tests
+            //console.log( "connected to " + relay );
+            heartbeat = true;
+            addDmsToSidebar();
+            var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
+            var filter  = { "ids": subscribed_channels }
+            var subscription = [ "REQ", subId, filter ]
+            socket.send(JSON.stringify( subscription ));
+            //this gives users open dms
+            var openSubId   = "encrypted-open-dms" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, 20 );
+            sessionStorage[ "encrypted-open-dms" ] = openSubId;
+            var openFilter  = {
+                "kinds": [ 4 ],
+                "#p": [ pubKey ],
+                "limit": 200
+            }
+            var openSubscription = [ "REQ", openSubId, openFilter ]
+            var sendable = JSON.stringify( openSubscription )
+            socket.send( sendable );
+        }
+
+        socket.addEventListener('open', openConnection );
+
+        async function getSignedEvent(event, privateKey) {
+            var eventArray = [
+                0,                    // Reserved for future use
+                event['pubkey'],        // The sender's public key
+                event['created_at'],    // Unix timestamp
+                event['kind'],        // Message “kind” or type
+                event['tags'],        // Tags identify replies/recipients
+                event['content']        // Your note contents
+            ];
+            var eventData = JSON.stringify( eventArray );
+            event.id  = sha256( eventData ).toString( 'hex' )
+            if ( window.nostr ) {
+                var signedEvent = await window.nostr.signEvent( event );
+                if ( typeof( signedEvent ) == "string" ) {
+                    event.sig = signedEvent;
+                } else {
+                    event.sig = signedEvent.sig;
+                }
+            } else {
+                event.sig = await schnorr.sign( event.id, privateKey ) 
+            }
+            return event
+        }
+        function hexToBytes( hex ) {
+            return Uint8Array.from( hex.match( /.{1,2}/g ).map( ( byte ) => parseInt( byte, 16 ) ) );
+        }
+
+        function bytesToHex( bytes ) {
+            return bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, '0' ), '' );
+        }
+        function base64ToHex( str ) {
+            var raw = atob( str );
+            var result = '';
+            var i; for ( i=0; i<raw.length; i++ ) {
+                var hex = raw.charCodeAt( i ).toString( 16 );
+                result += ( hex.length === 2 ? hex : '0' + hex );
+            }
+            return result;
+        }
+        function encrypt( privkey, pubkey, text ) {
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var iv = window.crypto.getRandomValues(new Uint8Array(16));
+            var cipher = browserifyCipher.createCipheriv( 'aes-256-cbc', hexToBytes( key ), iv );
+            var encryptedMessage = cipher.update(text,"utf8","base64");
+            emsg = encryptedMessage + cipher.final( "base64" );
+            var uint8View = new Uint8Array( iv.buffer );
+            var decoder = new TextDecoder();
+            return emsg + "?iv=" + btoa( String.fromCharCode.apply( null, uint8View ) );
+        }
+        function decrypt( privkey, pubkey, ciphertext ) {
+            var [ emsg, iv ] = ciphertext.split( "?iv=" );
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var decipher = browserifyCipher.createDecipheriv(
+                'aes-256-cbc',
+                hexToBytes( key ),
+                hexToBytes( base64ToHex( iv ) )
+            );
+            var decryptedMessage = decipher.update( emsg, "base64" );
+            dmsg = decryptedMessage + decipher.final( "utf8" );
+            return dmsg;
+        }
+    </script>
+    <script>
+        function displayChannel( image, name, message, id, timestamp ) {
+            var html = `
+                        <li class="channel-outer ${id}" data-id="${id}" data-img="${image}" onclick="selectChannel( this );">
+                            <a>
+                                <span style="background-image: url(${image})"></span>
+                                <div class="channel-inner">
+                                    <div class="name">${name}</div>
+                                    <div data-timestamp="${timestamp}" class="message">${message}</div>
+                                </div>
+                            </a>
+                        </li>
+            `;
+            return html;
+        }
+    </script>
+    <script>
+        function selectChannel( channel ) {
+            existing_messages = [];
+            if ( sessionStorage[ "add-messages-subid" ] ) {
+                var closerid = sessionStorage[ "add-messages-subid" ];
+                var closer = [ "CLOSE", closerid ];
+            }
+            socket.send(JSON.stringify( closer ));
+            var i; for ( i=0; i<document.getElementsByClassName( "active" ).length; i++ ) {
+                document.getElementsByClassName( "active" )[ i ].classList.remove( "active" );
+            }
+            document.getElementsByClassName( channel.getAttribute( "data-id" ) )[ 0 ].classList.add( "active" );
+            var html = `
+                <div class="message-header">
+                    <div class="channel-info">
+                        <span style="background-image: url(${channel.getAttribute( "data-img" )})"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">${channel.getElementsByClassName( "name" )[ 0 ].innerText}</div>
+                            <div data-timestamp="${channel.getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" )}" class="time">${channel.getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestring" )}</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="info-circle">
+                                <a>
+                                    <i class="fa fa-info-circle"></i>
+                                </a>
+                            </li>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="infobox">
+                    <span class="infobox-text">Channel id: ${channel.getAttribute( "data-id" )}</span>
+                    <span class="infobox-x">&times;</span>
+                </div>
+                <div class="message-content">
+                </div>
+                <div class="message-form">
+                    <ul>
+                        <li class="emoji-btn" onclick="showEmojis( 0 )">
+                            <a>
+                                <i class="fa fa-laugh"></i>
+                            </a>
+                        </li>
+                        <li class="input">
+                            <textarea class="note-input" rows="1" cols="70" type="text" placeholder="Say something" onfocus='document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;setTimeout( function() {if ( document.getElementsByClassName( "bubble" ).length > 0 ) {document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();}}, 800 );'></textarea>
+                        </li>
+                        <li class="send-btn">
+                            <a>
+                                <i class="fa fa-paper-plane"></i>
+                            </a>
+                        </li>
+                        <li class="sound-btn">
+                            <a>
+                                <i class="fa fa-microphone"></i>
+                            </a>
+                        </li>
+                        <li class="image-btn">
+                            <a>
+                                <i class="fa fa-image"></i>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            `;
+            document.getElementsByClassName( "content" )[ 0 ].innerHTML = html;
+            if ( window.innerWidth < 601 ) {
+                var html2 = `
+                    <span class="sidebar_arrow">&rsaquo;</span>
+                    <div class="channel-info">
+                        <span style="background-image: url(${channel.getAttribute( "data-img" )})"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">${channel.getElementsByClassName( "name" )[ 0 ].innerText}</div>
+                            <div data-timestamp="${channel.getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" )}" class="time">${channel.getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestring" )}</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="info-circle">
+                                <a>
+                                    <i class="fa fa-info-circle"></i>
+                                </a>
+                            </li>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="infobox">
+                    Channel id: ${channel.getAttribute( "data-id" )}
+                    <span class="infobox-x">&times;</span>
+                </div>
+                `;
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].innerHTML = html2;
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.width = "100%";
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.width = window.innerWidth - 38 + "px";
+            }
+            if ( window.innerWidth < 601 ) {
+                document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "none";
+                document.getElementsByClassName( "content" )[ 0 ].style.display = "block";
+                document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;
+                if ( document.getElementsByClassName( "bubble" ).length > 0 ) {
+                    document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();
+                }
+                document.getElementsByClassName( "message-header" )[ 0 ].remove();
+            }
+            if ( document.getElementsByClassName( "sidebar_arrow" )[ 0 ] ) {
+                document.getElementsByClassName( "sidebar_arrow" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "block";
+                    document.getElementsByClassName( "content" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "none";
+                })
+            }
+            document.getElementsByClassName( "info-circle" )[ 0 ].addEventListener( "click", function() {
+                document.getElementsByClassName( "infobox" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "infobox-x" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "infobox" )[ 0 ].style.display = "none";
+                })
+            });
+            document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+                showSettings();
+            });
+            document.getElementsByClassName( "input" )[ 0 ].firstElementChild.addEventListener( 'keypress', function ( e ) {
+                if ( e.key === 'Enter' && !isShiftDown() ) {
+                  sendNote();
+                }
+            });
+            document.getElementsByClassName( "send-btn" )[ 0 ].addEventListener( 'click', function ( e ) {
+                keymap[ "Shift" ] = false;
+                sendNote();
+            });
+            addMessages( channel.getAttribute( "data-id" ) );
+        }
+    </script>
+    <script>
+        function addMessages( id ) {
+            var cached_messages = msg_cache[ id ];
+            var time_for_since = 0;
+            cached_messages.forEach( function( msg, i ) {
+                var color = msg[ Object.keys( msg )[ 0 ] ][ "color" ];
+                var content = msg[ Object.keys( msg )[ 0 ] ][ "content" ];
+                var event_time = msg[ Object.keys( msg )[ 0 ] ][ "event_time" ];                
+                var id = msg[ Object.keys( msg )[ 0 ] ][ "id" ];
+                var name = msg[ Object.keys( msg )[ 0 ] ][ "name" ];
+                var parent = msg[ Object.keys( msg )[ 0 ] ][ "parent" ];
+                var picture = msg[ Object.keys( msg )[ 0 ] ][ "picture" ];
+                var pubkey = msg[ Object.keys( msg )[ 0 ] ][ "pubkey" ];
+                var now = Math.floor( Date.now() / 1000 )
+                var how_long_ago = convertHMS( now - event_time )
+                var div = document.createElement( "div" );
+                if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                    name = namemap[ pubkey ];
+                }
+                if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                    picture = imagemap[ pubkey ];
+                }
+                div.classList.add( "message" );
+                div.classList.add( id );
+                var isMine = ( pubkey == pubKey );
+                if ( isMine ) {
+                    div.setAttribute( "data-author", pubkey );
+                    div.classList.add( "me" );
+                    var html = `<div class="bubble">${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>`;
+                    div.innerHTML = html;
+                } else {
+                    var html = `
+                        <span class="picture" style="background-image: url(${picture})" onclick="showProfile( '${pubkey}', '${name}', '${picture}' )"></span>
+                        <div class="bubble"><div class="author ${color} ${pubkey}">${name}</div>${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>
+                    `;
+                    div.innerHTML = html;
+                }
+                if ( now - event_time > 15 ) {
+                    document.getElementsByClassName( "message-content" )[ 0 ].prepend( div );
+                } else {
+                    document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                }
+                if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( window.innerWidth < 601 && Number( document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                }
+                if ( Number( document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                    document.getElementsByClassName( parent )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestring", how_long_ago );
+                }
+                document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;
+                if ( document.getElementsByClassName( "bubble" ).length > 0 ) {
+                    document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();
+                }
+                if ( i == cached_messages.length - 1 ) {
+                    time_for_since = event_time - 5;
+                }
+            });
+            var subId   = "add-messages" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, 20 );
+            sessionStorage[ "add-messages-subid" ] = subId;
+            var filter  = {
+                "kinds": [ 42 ],
+                "#e": [id],
+                "since": time_for_since,
+                "limit": 200
+            }
+            var subscription = [ "REQ", subId, filter ]
+            socket.send(JSON.stringify( subscription ));
+        }
+    </script>
+    <script>
+//this code is for "closed dms" where you only see someone's dms if you first add them to your sidebar
+        function addClosedDecryptedMessages( pubkey ) {
+            if ( msg_cache[ pubkey ] ) {
+                var cached_messages = msg_cache[ pubkey ];
+                var time_for_since = 0;
+                cached_messages.forEach( function( msg, i ) {
+                    var color = msg[ Object.keys( msg )[ 0 ] ][ "color" ];
+                    var content = msg[ Object.keys( msg )[ 0 ] ][ "content" ];
+                    var event_time = msg[ Object.keys( msg )[ 0 ] ][ "event_time" ];                
+                    var id = msg[ Object.keys( msg )[ 0 ] ][ "id" ];
+                    var name = msg[ Object.keys( msg )[ 0 ] ][ "name" ];
+                    var parent = msg[ Object.keys( msg )[ 0 ] ][ "parent" ];
+                    var picture = msg[ Object.keys( msg )[ 0 ] ][ "picture" ];
+                    var pubkey = msg[ Object.keys( msg )[ 0 ] ][ "pubkey" ];
+                    var now = Math.floor( Date.now() / 1000 )
+                    var how_long_ago = convertHMS( now - event_time )
+                    var div = document.createElement( "div" );
+                    if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                        name = namemap[ pubkey ];
+                    }
+                    if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                        picture = imagemap[ pubkey ];
+                    }
+                    div.classList.add( "message" );
+                    div.classList.add( id );
+                    var isMine = ( pubkey == pubKey );
+                    if ( isMine ) {
+                        div.setAttribute( "data-author", pubkey );
+                        div.classList.add( "me" );
+                        var html = `<div class="bubble">${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>`;
+                        div.innerHTML = html;
+                    } else {
+                        var html = `
+                            <span class="picture" style="background-image: url(${picture})" onclick="showProfile( '${pubkey}', '${name}', '${picture}' )"></span>
+                            <div class="bubble"><div class="author ${color} ${pubkey}">${name}</div>${content}<div data-timestamp="${event_time}" class="time bubbletime">${how_long_ago}</div></div>
+                        `;
+                        div.innerHTML = html;
+                    }
+                    if ( now - event_time > 15 ) {
+                        document.getElementsByClassName( "message-content" )[ 0 ].prepend( div );
+                    } else {
+                        document.getElementsByClassName( "message-content" )[ 0 ].append( div );
+                    }
+                    if ( document.getElementsByClassName( "message-header" )[ 0 ] && Number( document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                        document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                        document.getElementsByClassName( "message-header" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                    }
+                    if ( window.innerWidth < 601 && Number( document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                        document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                        document.getElementsByClassName( "message-header-alt" )[ 0 ].getElementsByClassName( "time" )[ 0 ].innerText = how_long_ago;
+                    }
+                    if ( Number( document.getElementsByClassName( parent.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].getAttribute( "data-timestamp" ) ) < Number( event_time ) ) {
+                        document.getElementsByClassName( parent.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestamp", event_time );
+                        document.getElementsByClassName( parent.substring( 0, 20 ) )[ 0 ].getElementsByClassName( "message" )[ 0 ].setAttribute( "data-timestring", how_long_ago );
+                    }
+                    document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;
+                    if ( document.getElementsByClassName( "bubble" ).length > 0 ) {
+                        document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();
+                    }
+                    if ( i == cached_messages.length - 1 ) {
+                        time_for_since = event_time - 5;
+                    }
+                });
+            }
+            var closedSubId   = "encrypted-dms" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, 20 );
+            sessionStorage[ "encrypted-dms-subid" ] = closedSubId;
+            var closedFilter  = {
+                "authors": [ pubKey, pubkey ],
+                "kinds": [ 4 ],
+                "#p": [ pubKey, pubkey ],
+                "since": time_for_since,
+                "limit": 200
+            }
+            var closedSubscription = [ "REQ", closedSubId, closedFilter ]
+            socket.send(JSON.stringify( closedSubscription ));
+        }
+    </script>
+    <script>
+        function getLatestMessage( id ) {
+            var subId   = "latest-message" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, 20 );
+            var filter  = {
+                "kinds": [ 42 ],
+                "#e": [id],
+                "limit": 1
+            }
+            var subscription = [ "REQ", subId, filter ]
+            socket.send(JSON.stringify( subscription ));
+        }
+    </script>
+    <script>
+        async function sendNote() {
+            var note = document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value;
+            if ( !note || note == "" ) return;
+            var now = Math.floor( Date.now() / 1000 );
+            var id = document.getElementsByClassName( "channel-outer active" )[ 0 ].getAttribute( "data-id" );
+            var event = {
+                "content"    : note,
+                "created_at" : now,
+                "kind"       : 42,
+                "tags"       : [["e", id]],
+                "pubkey"     : pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, privKey);
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]))
+            document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value = "";
+        }
+    </script>
+    <script>
+        async function sendEncryptedNote( note, pubkey ) {
+            var note = document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value;
+            if ( !note || note == "" ) return;
+            var now = Math.floor( Date.now() / 1000 );
+            if ( window.nostr ) {
+                var encrypted = await window.nostr.nip04.encrypt( pubkey, note );
+            } else {
+                var encrypted = encrypt( privKey, pubkey, note );
+            }
+            var event = {
+                "content"    : encrypted,
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 4,
+                "tags"       : [ [ 'p', pubkey ] ],
+                "pubkey"     : pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, privKey)
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]))
+            document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value = "";
+        }
+    </script>
+    <script>
+        function convertHMS(value) {
+            const sec = parseInt(value, 10); // convert value to number if it's string
+            let years   = Math.floor(sec / 31536000); // get years
+            let months  = Math.floor((sec - (years * 31536000)) / 2592000); // get months
+            let days    = Math.floor((sec - (years * 31536000) - (months * 2592000)) / 86400); // get days
+            let hours   = Math.floor((sec - (years * 31536000) - (months * 2592000) - (days * 86400)) / 3600); // get hours
+            let minutes = Math.floor((sec - (years * 31536000) - (months * 2592000) - (days * 86400) - (hours * 3600)) / 60); // get minutes
+            let seconds = sec - (years * 31536000) - (months * 2592000) - (days * 86400) - (hours * 3600) - (minutes * 60); //  get seconds
+            var yearsstring = (years > 1) ? "years":"year";
+            var monthsstring = (months > 1) ? "months":"month";
+            var daysstring = (days > 1) ? "days":"day";
+            var hoursstring = (hours > 1) ? "hours":"hour";
+            var minutesstring = (minutes > 1) ? "minutes":"minute";
+            var secondsstring = (seconds > 1) ? "seconds":"second";
+            if ( years > 0 ) {
+                return years + " " + yearsstring + " ago";
+            }
+            if ( months > 0 ) {
+                return months + " " + monthsstring + " ago";
+            }
+            if ( days > 0 ) {
+                return days + " " + daysstring + " ago";
+            }
+            if ( hours > 0 ) {
+                return hours + " " + hoursstring + " ago";
+            }
+            if ( minutes > 0 ) {
+                return minutes + " " + minutesstring + " ago";
+            }
+            if ( seconds == 0 ) {
+                return seconds + " seconds ago";
+            }
+            return seconds + " " + secondsstring + " ago";
+        }
+    </script>
+    <script>
+        function checkHeartbeat() {
+            heartbeat = false;
+            var heartbeatsubId   = "00000002" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+            var heartbeatfilter  = { "ids": [ "41ce9bc50da77dda5542f020370ecc2b056d8f2be93c1cedf1bf57efcab095b0" ] }
+            var heartbeatsub     = [ "REQ", heartbeatsubId, heartbeatfilter ];
+            socket.send(JSON.stringify( heartbeatsub ));
+            setTimeout( function() {
+                var closer = [ "CLOSE", heartbeatsubId ];
+                socket.send(JSON.stringify( closer ));
+            }, 1500 );
+            setTimeout( function() {
+                if ( !heartbeat ) {
+                    //heartbeat tests
+                    //showToast( "the heartbeat function needed activation" );
+                    socket.removeEventListener( 'open', openConnection );
+                    socket = new WebSocket( relay );
+                    socket.addEventListener( 'open', openConnection );
+                }
+            }, 2000 );
+        }
+    </script>
+    <script>
+        function modDMMeta() {
+            var i; for ( i=0; i<document.getElementsByClassName( "dm-outer" ).length; i++ ) {
+                var pubkey = document.getElementsByClassName( "dm-outer" )[ i ].getAttribute( "data-pubkey" );
+                getUserMeta( pubkey );
+            }
+        }
+    </script>
+    <script>
+        function doBackgroundTasks() {
+            array_of_pubkeys.forEach( function() {
+                getUserMeta( array_of_pubkeys[ 0 ] );
+                array_of_pubkeys.shift();
+            });
+            setTimeout( function() {checkHeartbeat();}, 10000 );
+            var i; for ( i=0; i<document.getElementsByClassName( "time" ).length; i++ ) {
+                var now = Math.floor( Date.now() / 1000 )
+                var event_time = document.getElementsByClassName( "time" )[ i ].getAttribute( "data-timestamp" )
+                var how_long_ago = convertHMS( now - event_time )
+                document.getElementsByClassName( "time" )[ i ].innerText = how_long_ago;
+            }
+            setTimeout( function() {doBackgroundTasks();}, 10000 );
+            modDMMeta();
+            leftJustifyImages();
+            Object.keys( imagemap ).forEach( function( pubkey ) {
+                if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                    var i; for ( i=0; i<document.getElementsByClassName( pubkey ).length; i++ ) {
+                        if ( !document.getElementsByClassName( pubkey )[ i ].classList.contains( "removable-channel" ) ) {
+                            document.getElementsByClassName( pubkey )[ i ].parentElement.parentElement.getElementsByClassName( "picture" )[ 0 ].style.backgroundImage = "url(" + imagemap[ pubkey ] + ")";
+                        }
+                    }
+                    var i; for ( i=0; i<document.getElementsByClassName( pubkey.substring( 0, 20 ) ).length; i++ ) {
+                        document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ i ].getElementsByTagName( "span" )[ 0 ].style.backgroundImage = "url(" + imagemap[ pubkey ] + ")";
+                    }
+                }
+            });
+            Object.keys( namemap ).forEach( function( pubkey ) {
+                if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                    var i; for ( i=0; i<document.getElementsByClassName( pubkey ).length; i++ ) {
+                        if ( !document.getElementsByClassName( pubkey )[ i ].classList.contains( "removable-channel" ) ) {
+                            document.getElementsByClassName( pubkey )[ i ].innerText = namemap[ pubkey ];
+                        }
+                    }
+                    var i; for ( i=0; i<document.getElementsByClassName( pubkey.substring( 0, 20 ) ).length; i++ ) {
+                        document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ i ].getElementsByClassName( "name" )[ 0 ].innerText = namemap[ pubkey ];
+                    }
+                }
+            });
+        }
+        doBackgroundTasks();
+    </script>
+    <script>
+        function manageChannels() {
+            var i; for ( i=0; i<document.getElementsByClassName( "active" ).length; i++ ) {
+                document.getElementsByClassName( "active" )[ i ].classList.remove( "active" );
+            }
+            document.getElementsByClassName( "manage-channels-outer" )[ 0 ].classList.add( "active" );
+            var channels_info = [];
+            var i; for ( i=0; i<document.getElementsByClassName( "channel-outer" ).length; i++ ) {
+                var obj = {}
+                obj[ "id" ] = document.getElementsByClassName( "channel-outer" )[ i ].getAttribute( "data-id" );
+                obj[ "img" ] = document.getElementsByClassName( "channel-outer" )[ i ].getAttribute( "data-img" );
+                obj[ "name" ] = document.getElementsByClassName( "channel-outer" )[ i ].getElementsByClassName( "name" )[ 0 ].innerText;
+                channels_info.push( obj );
+            }
+            var html = `
+                <div class="message-header">
+                    <div class="channel-info">
+                        <span class="plus-circle fa fa-list-check"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">Manage channels</div>
+                            <div class="message">Find/create/remove channels</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="message-content">
+                    <h2>Add by channel id</h2>
+                    <input class="add-channel-input" type="text" placeholder="channel id" />
+                    <button class="add-channel-btn">Submit</button>
+                    <h2 style="margin-top: 20px;">Remove a channel</h2>
+                    <div class="removable-channels"></div>
+                    <h2 style="margin-top: 20px;">Create a channel</h2>
+                    <input class="create-channel-name" type="text" placeholder="channel name" />
+                    <input class="create-channel-image" type="text" placeholder="channel image e.g. https://i.ibb.co/Q8X9cQL/bitcoin-chess.png" />
+                    <p class="image-instructions">The image needs to be hosted externally (such as on imgur or imgbb) because I don't want to store a bunch of images</p>
+                    <button class="create-channel-btn" onclick="createChannel()">Submit</button>
+                </div>
+            `;
+            document.getElementsByClassName( "content" )[ 0 ].innerHTML = html;
+            channels_info.forEach( function( item ) {
+                document.getElementsByClassName( "removable-channels" )[ 0 ].innerHTML += `
+                        <div class="removable-channel ${item.id}">
+                            <span class="x-circle" onclick="removeChannel( '${item.id}' )">&times;</span>
+                            <span class="img-circle" style="background-image: url(${item.img})"></span>
+                            <span class="removable-channel-name">${item.name}</span>
+                            <div style="clear: both"></div>
+                        </div>
+                `;
+            })
+            Object.keys(dms_info).forEach( function( item ) {
+                document.getElementsByClassName( "removable-channels" )[ 0 ].innerHTML += `
+                        <div class="removable-channel ${item}">
+                            <span class="x-circle" onclick="removeDm( '${item}' )">&times;</span>
+                            <span class="img-circle" style="background-image: url(${dms_info[ item ][ "picture" ]})"></span>
+                            <span class="removable-channel-name">${dms_info[ item ][ "name" ]}</span>
+                            <div style="clear: both"></div>
+                        </div>
+                `;
+            })
+            document.getElementsByClassName( "message-content" )[ 0 ].style.display = "block";
+            document.getElementsByClassName( "message-content" )[ 0 ].style.flexDirection = "initial";
+            if ( window.innerWidth < 601 ) {
+                var html2 = `
+                    <span class="sidebar_arrow">&rsaquo;</span>
+                    <div class="channel-info">
+                        <span class="plus-circle fa fa-list-check"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">Manage channels</div>
+                            <div class="message">Find/create/remove channels</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                `;
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].innerHTML = html2;
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.width = "100%";
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.width = window.innerWidth - 38 + "px";
+            }
+            if ( window.innerWidth < 601 ) {
+                document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "none";
+                document.getElementsByClassName( "content" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header" )[ 0 ].remove();
+            }
+            if ( document.getElementsByClassName( "sidebar_arrow" )[ 0 ] ) {
+                document.getElementsByClassName( "sidebar_arrow" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "block";
+                    document.getElementsByClassName( "content" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "none";
+                })
+            }
+            document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+                showSettings();
+            });
+            document.getElementsByClassName( "add-channel-btn" )[ 0 ].addEventListener( 'click', function ( e ) {
+                var channel_id = document.getElementsByClassName( "add-channel-input" )[ 0 ].value;
+                if ( channel_id && channel_id != "" ) {addChannel( channel_id );}
+            });
+            document.getElementsByClassName( "add-channel-input" )[ 0 ].addEventListener( 'keypress', function ( e ) {
+                if ( e.key === 'Enter' ) {
+                    var channel_id = document.getElementsByClassName( "add-channel-input" )[ 0 ].value;
+                    if ( channel_id && channel_id != "" ) {addChannel( channel_id );}
+                }
+            });
+        }
+    </script>
+    <script>
+        async function showSettings() {
+            var i; for ( i=0; i<document.getElementsByClassName( "active" ).length; i++ ) {
+                document.getElementsByClassName( "active" )[ i ].classList.remove( "active" );
+            }
+            if ( namemap[ pubKey ] && namemap[ pubKey ] != "none" ) {
+                var name = namemap[ pubKey ];
+            }
+            if ( imagemap[ pubKey ] && imagemap[ pubKey ] != "none" ) {
+                var picture = imagemap[ pubKey ];
+            }
+            if ( localStorage[ "my-meta-info" ] ) {
+                var myMetaInfo = JSON.parse( localStorage[ "my-meta-info" ] );
+                var name = myMetaInfo[ "name" ];
+                var about = myMetaInfo[ "about" ];
+                var picture = myMetaInfo[ "picture" ];
+            } else {
+                if ( !name ) {
+                    var name = "";
+                }
+                var about = "";
+                if ( !picture ) {
+                    var picture = "";
+                }
+            }
+            var html = `
+                <div class="message-header">
+                    <div class="channel-info">
+                        <span class="plus-circle fa fa-sliders"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">Settings</div>
+                            <div class="message">Modify all the things</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="message-content">
+                    <h2>Your info</h2>
+                    <input class="display-name" type="text" placeholder="display name" value="${name}" />
+                    <textarea class="about-input" type="text" rows="5" cols="70" placeholder="enter info about yourself">${about}</textarea>
+                    <input class="user-picture" type="text" placeholder="user picture e.g. https://i.ibb.co/Q8X9cQL/bitcoin-chess.png" value="${picture}" />
+                    <p class="image-instructions">The image needs to be hosted externally (such as on imgur or imgbb) because I don't want to store a bunch of images</p>
+                    <button class="submit-user-info" onclick="submitUserInfo()">Submit</button>
+                    <h2 style="margin-top: 20px;">Your public key</h2>
+                    <input class="public-key" type="text" value="${pubKey}" disabled />
+                    <button class="copy-pubkey-btn">Copy</button>
+                    <h2 style="margin-top: 20px;">Your private key</h2>
+                    <input class="private-key" type="text" value="${privKey}" disabled />
+                    <button class="copy-privkey-btn">Copy</button>
+                    <h2 style="margin-top: 20px;">Import an account</h2>
+                    <input class="import-privkey-input" type="text" placeholder="paste a private key" />
+                    <button class="import-privkey-btn">Import</button>
+                </div>
+            `;
+            document.getElementsByClassName( "content" )[ 0 ].innerHTML = html;
+            document.getElementsByClassName( "message-content" )[ 0 ].style.display = "block";
+            document.getElementsByClassName( "message-content" )[ 0 ].style.flexDirection = "initial";
+            if ( window.innerWidth < 601 ) {
+                var html2 = `
+                    <span class="sidebar_arrow">&rsaquo;</span>
+                    <div class="channel-info">
+                        <span class="plus-circle fa fa-sliders"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">Settings</div>
+                            <div class="message">Modify all the things</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                `;
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].innerHTML = html2;
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.width = "100%";
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.width = window.innerWidth - 38 + "px";
+            }
+            if ( window.innerWidth < 601 ) {
+                document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "none";
+                document.getElementsByClassName( "content" )[ 0 ].style.display = "flex";
+            }
+            if ( document.getElementsByClassName( "sidebar_arrow" )[ 0 ] ) {
+                document.getElementsByClassName( "sidebar_arrow" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "block";
+                    document.getElementsByClassName( "content" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "none";
+                })
+            }
+            document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+                showSettings();
+            });
+            document.getElementsByClassName( "copy-pubkey-btn" )[ 0 ].addEventListener( "click", function() {
+                copyText( document.getElementsByClassName( "public-key" )[ 0 ] );
+            });
+            document.getElementsByClassName( "copy-privkey-btn" )[ 0 ].addEventListener( "click", function() {
+                copyText( document.getElementsByClassName( "private-key" )[ 0 ] );
+            });
+            document.getElementsByClassName( "import-privkey-btn" )[ 0 ].addEventListener( "click", function() {
+                importPrivkey( document.getElementsByClassName( "import-privkey-input" )[ 0 ].value );
+                if ( sessionStorage[ "encrypted-open-dms" ] ) {
+                    var closerid = sessionStorage[ "encrypted-open-dms" ];
+                    var closer = [ "CLOSE", closerid ];
+                }
+                var openSubId   = "encrypted-open-dms" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, 20 );
+                sessionStorage[ "encrypted-open-dms" ] = openSubId;
+                var openFilter  = {
+                    "kinds": [ 4 ],
+                    "#p": [ pubKey ],
+                    "limit": 200
+                }
+                var openSubscription = [ "REQ", openSubId, openFilter ]
+                var sendable = JSON.stringify( openSubscription )
+                socket.send( sendable );
+            });
+        }
+    </script>
+    <script>
+        async function showProfile( pubkey, name, picture ) {
+            var i; for ( i=0; i<document.getElementsByClassName( "active" ).length; i++ ) {
+                document.getElementsByClassName( "active" )[ i ].classList.remove( "active" );
+            }
+            var html = `
+                <div class="message-header">
+                    <div class="channel-info">
+                        <span class="plus-circle">P</span>
+                        <div class="channel-wrapper">
+                            <div class="name">Profile</div>
+                            <div class="message">Check someone out</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="message-content">
+                    <img class="big-picture" src="${picture}" />
+                    <h2>${name}</h2>
+                    <p class="profile-about" style="display: none;">${name} lives in an abandoned warehouse on top of a mountain in a jungle. Surviving only on bananas and leftover car parts, ${name} roams the wild horizon of the amazon, looking on and on for something not yet grokked</p>
+                    <h2 style="margin-top: 20px;">${name}'s public key</h2>
+                    <p class="profile-pubkey">${pubkey}</p>
+                    <button class="dm" onclick="dmThisUser( '${pubkey}', '${name}', '${picture}' )">Direct message this user</button>
+                </div>
+            `;
+            document.getElementsByClassName( "content" )[ 0 ].innerHTML = html;
+            document.getElementsByClassName( "message-content" )[ 0 ].style.display = "block";
+            document.getElementsByClassName( "message-content" )[ 0 ].style.flexDirection = "initial";
+            if ( window.innerWidth < 601 ) {
+                var html2 = `
+                    <span class="sidebar_arrow">&rsaquo;</span>
+                    <div class="channel-info">
+                        <span class="plus-circle">P</span>
+                        <div class="channel-wrapper">
+                            <div class="name">Profile</div>
+                            <div class="message">Check someone out</div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                `;
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].innerHTML = html2;
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.width = "100%";
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.width = window.innerWidth - 38 + "px";
+            }
+            if ( window.innerWidth < 601 ) {
+                document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "none";
+                document.getElementsByClassName( "content" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header" )[ 0 ].remove();
+            }
+            if ( document.getElementsByClassName( "sidebar_arrow" )[ 0 ] ) {
+                document.getElementsByClassName( "sidebar_arrow" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "block";
+                    document.getElementsByClassName( "content" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "none";
+                })
+            }
+            document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+                showSettings();
+            });
+        }
+    </script>
+    <script>
+        function dmThisUser( pubkey, name, picture ) {
+            if ( !document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ] ) {
+                document.getElementsByClassName( "channels" )[ 0 ].firstElementChild.innerHTML += displayDMbox( pubkey, name, picture );
+                var obj = {}
+                obj[ "pubkey" ] = pubkey;
+                obj[ "name" ] = name;
+                obj[ "picture" ] = picture;
+                dms_info[ pubkey ] = obj;
+                localStorage[ "dms_info" ] = JSON.stringify( dms_info );
+                msg_cache[ pubkey ] = [];
+                localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+            }
+            selectDM( pubkey, name, picture );
+        }
+    </script>
+    <script>
+        function displayDMbox( pubkey, name, picture ) {
+            var html = `
+                        <li class="dm-outer ${pubkey.substring( 0, 20 )}" data-pubkey="${pubkey}" data-img="${picture}" onclick="selectDM( '${pubkey}', '${name}', '${picture}' );">
+                            <a>
+                                <span style="background-image: url(${picture})"></span>
+                                <div class="dm-inner">
+                                    <div class="name">${name}</div>
+                                    <div data-timestamp="" class="message"></div>
+                                </div>
+                            </a>
+                        </li>
+            `;
+            return html;
+        }
+    </script>
+    <script>
+        async function selectDM( pubkey, name, picture ) {
+            existing_messages = [];
+            var i; for ( i=0; i<document.getElementsByClassName( "active" ).length; i++ ) {
+                document.getElementsByClassName( "active" )[ i ].classList.remove( "active" );
+            }
+            document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ].classList.add( "active" );
+            var html = `
+                <div class="message-header">
+                    <div class="channel-info">
+                        <span style="background-image: url(${picture})"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">${name}</div>
+                            <div class="time"></div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="message-content">
+                </div>
+                <div class="message-form">
+                    <ul>
+                        <li class="emoji-btn" onclick="showEmojis( 0 )">
+                            <a>
+                                <i class="fa fa-laugh"></i>
+                            </a>
+                        </li>
+                        <li class="input">
+                            <textarea class="note-input" rows="1" cols="70" type="text" placeholder="Say something" onfocus='document.getElementsByClassName( "message-content" )[ 0 ].scrollTop = document.getElementsByClassName( "message-content" )[ 0 ].scrollHeight;setTimeout( function() {if ( document.getElementsByClassName( "bubble" ).length > 0 ) {document.getElementsByClassName( "bubble" )[ document.getElementsByClassName( "bubble" ).length - 1 ].scrollIntoView();}}, 800 );'></textarea>
+                        </li>
+                        <li class="send-btn">
+                            <a>
+                                <i class="fa fa-paper-plane"></i>
+                            </a>
+                        </li>
+                        <li class="sound-btn">
+                            <a>
+                                <i class="fa fa-microphone"></i>
+                            </a>
+                        </li>
+                        <li class="image-btn">
+                            <a>
+                                <i class="fa fa-image"></i>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            `;
+            document.getElementsByClassName( "content" )[ 0 ].innerHTML = html;
+            if ( window.innerWidth < 601 ) {
+                var html2 = `
+                    <span class="sidebar_arrow">&rsaquo;</span>
+                    <div class="channel-info">
+                        <span style="background-image: url(${picture})"></span>
+                        <div class="channel-wrapper">
+                            <div class="name">${name}</div>
+                            <div class="time"></div>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <ul>
+                            <li class="hotdog">
+                                <a>
+                                    <i class="fa fa-ellipsis-v"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                `;
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].innerHTML = html2;
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.width = "100%";
+                document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "flex";
+                document.getElementsByClassName( "message-header-alt" )[ 0 ].style.width = window.innerWidth - 38 + "px";
+            }
+            if ( window.innerWidth < 601 ) {
+                document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "none";
+                document.getElementsByClassName( "content" )[ 0 ].style.display = "flex";
+            }
+            if ( document.getElementsByClassName( "sidebar_arrow" )[ 0 ] ) {
+                document.getElementsByClassName( "sidebar_arrow" )[ 0 ].addEventListener( "click", function() {
+                    document.getElementsByClassName( "sidebar" )[ 0 ].style.display = "block";
+                    document.getElementsByClassName( "content" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-hinder" )[ 0 ].style.display = "none";
+                    document.getElementsByClassName( "message-header-alt" )[ 0 ].style.display = "none";
+                })
+            }
+            document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+                showSettings();
+            });
+            document.getElementsByClassName( "input" )[ 0 ].firstElementChild.addEventListener( 'keypress', function ( e ) {
+                if ( e.key === 'Enter' && !isShiftDown() ) {
+                  sendEncryptedNote( document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value, pubkey );
+                }
+            });
+            document.getElementsByClassName( "send-btn" )[ 0 ].addEventListener( 'click', function ( e ) {
+                keymap[ "Shift" ] = false;
+                sendEncryptedNote( document.getElementsByClassName( "input" )[ 0 ].firstElementChild.value, pubkey );
+            });
+            addClosedDecryptedMessages( pubkey );
+        }
+    </script>
+    <script>
+        function addChannel( id ) {
+            document.getElementsByClassName( "add-channel-input" )[ 0 ].value = "";
+            if ( document.getElementsByClassName( id )[ 0 ] ) return
+            subscribed_channels.push( id );
+            var newsubId   = "00000000" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+            var newfilter  = { "ids": [ id ] }
+            var newsubscription = [ "REQ", newsubId, newfilter ]
+            socket.send(JSON.stringify( newsubscription ));
+            var stuff_to_backup = {}
+            stuff_to_backup[ "privkey" ] = privKey;
+            stuff_to_backup[ "pubkey" ] = pubKey;
+            stuff_to_backup[ "channels" ] = JSON.stringify( subscribed_channels );
+            stuff_to_backup[ "relays" ] = JSON.stringify( [ relay ] );
+            localStorage[ "backup" ] = JSON.stringify( stuff_to_backup );
+            msg_cache[ id ] = [];
+            localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+        }
+    </script>
+    <script>
+        function removeChannel( id ) {
+            var i; for ( i=0; i<document.getElementsByClassName( id ).length; i++ ) {
+                document.getElementsByClassName( id )[ i ].remove();
+                i = i - 1;
+            }
+            var i; for ( i=0; i<subscribed_channels.length; i++ ) {
+                if ( subscribed_channels[ i ] == id ) {
+                    subscribed_channels.pop( i );
+                }
+            }
+            var stuff_to_backup = {}
+            stuff_to_backup[ "privkey" ] = privKey;
+            stuff_to_backup[ "pubkey" ] = pubKey;
+            stuff_to_backup[ "channels" ] = JSON.stringify( subscribed_channels );
+            stuff_to_backup[ "relays" ] = JSON.stringify( [ relay ] );
+            localStorage[ "backup" ] = JSON.stringify( stuff_to_backup );
+            delete msg_cache[ id ];
+            localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+        }
+    </script>
+    <script>
+        function removeDm( pubkey ) {
+            var i; for ( i=0; i<document.getElementsByClassName( pubkey.substring( 0, 20 ) ).length; i++ ) {
+                document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ i ].remove();
+                i = i - 1;
+            }
+            var i; for ( i=0; i<document.getElementsByClassName( pubkey ).length; i++ ) {
+                document.getElementsByClassName( pubkey )[ i ].remove();
+                i = i - 1;
+            }
+            delete dms_info[ pubkey ];
+            localStorage[ "dms_info" ] = JSON.stringify( dms_info );
+            delete msg_cache[ pubkey ];
+            localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+        }
+    </script>
+    <script>
+        async function createChannel() {
+            var name = document.getElementsByClassName( "create-channel-name" )[ 0 ].value;
+            var img = document.getElementsByClassName( "create-channel-image" )[ 0 ].value;
+            if ( !name || name == "" ) {
+                showToast( "add a channel name first" );
+                return;
+            }
+            if ( !img || img == "" ) {
+                showToast( "add a channel image first" );
+                return;
+            }
+            if ( !img.startsWith( "https://" ) || ( !img.endsWith( ".png" ) && !img.endsWith( ".jpg" ) && !img.endsWith( ".jpeg" ) && !img.endsWith( ".gif" ) && !img.endsWith( ".webp" ) ) ) {
+                    showToast( "There was an error with your image url, it either did not begin with https:// or it did not end with .png, .jpg, .jpeg, .gif, or .webp" );
+                    return;
+                }
+            document.getElementsByClassName( "create-channel-name" )[ 0 ].value = "";
+            document.getElementsByClassName( "create-channel-image" )[ 0 ].value = "";
+            var chan = {}
+            chan[ "about" ] = "";
+            chan[ "name" ] = name;
+            chan[ "picture" ] = img;
+            var note = JSON.stringify( chan );
+            var event = {
+                "content"    : note,
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 40,
+                "tags"       : [],
+                "pubkey"     : pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, privKey);
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]))
+            setTimeout( function() {addChannel( signedEvent.id );}, 1500 );
+        }
+    </script>
+    <script>
+        async function checkForEncryptionErrors( privkey, pubkey, content ) {
+            try {
+                if ( window.nostr ) {
+                    var content = await window.nostr.nip04.decrypt( pubkey, content );
+                } else {
+                    var content = await decrypt( privkey, pubkey, content );
+                }
+            } catch ( e ) {  
+                return true;  
+            }
+            return false;
+        }
+    </script>
+    <script>
+        function checkForUserMetaErrors( content ) {
+            try {  
+                var json = JSON.parse( content );
+            } catch ( e ) {  
+                return true;  
+            }
+            return false;
+        }
+    </script>
+    <script>
+        function checkForChannelSubscriptionErrors( content ) {
+            try {  
+                var json = JSON.parse( content );
+                if ( !( "picture" in json ) ) {
+                    return true;
+                }  
+                if ( !( "name" in json ) ) {
+                    return true;
+                }
+                if ( !json[ "picture" ].startsWith( "https://" ) || ( !json[ "picture" ].endsWith( ".png" ) && !json[ "picture" ].endsWith( ".jpg" ) && !json[ "picture" ].endsWith( ".jpeg" ) && !json[ "picture" ].endsWith( ".gif" ) && !json[ "picture" ].endsWith( ".webp" ) ) ) {
+                    return true;
+                }
+            } catch ( e ) {  
+                return true;  
+            }
+            return false;
+        }
+    </script>
+    <script>
+        function copyText( element ) {
+            element.select();
+            element.setSelectionRange( 0, 99999 );
+            navigator.clipboard.writeText( element.value );
+            showToast( "copied" );
+        }
+    </script>
+    <script>
+        function isHex(string) {
+            var a = parseInt(string, 16)
+            var padding = "000000000000";
+            padding = padding + a.toString(16);
+            final = padding.slice( -Math.abs( string.length ) )
+            return final === string
+        }
+        function importPrivkey( privkey ) {
+            if ( privkey.length != 64 ) {
+                showToast( "Your private key must be a 32 byte hex-formatted string" );
+                return;
+            }
+            if ( !(
+                isHex( privkey.substring( 0, 8 ) )
+                && isHex( privkey.substring( 8, 16 ) )
+                && isHex( privkey.substring( 16, 24 ) )
+                && isHex( privkey.substring( 24, 32 ) )
+                && isHex( privkey.substring( 32, 40 ) )
+                && isHex( privkey.substring( 40, 48 ) )
+                && isHex( privkey.substring( 48, 56 ) )
+                && isHex( privkey.substring( 56, 64 ) )
+                ) ) {
+                showToast( "your private key is not hex" );
+                return;
+            }
+            var pubkey = nobleSecp256k1.getPublicKey( privkey, true )
+            pubkey = pubkey.substring( 2 );
+            privKey = privkey;
+            pubKey = pubkey;
+            document.getElementsByClassName( "public-key" )[ 0 ].value = pubKey;
+            document.getElementsByClassName( "private-key" )[ 0 ].value = privKey;
+            var stuff_to_backup = {}
+            stuff_to_backup[ "privkey" ] = privKey;
+            stuff_to_backup[ "pubkey" ] = pubKey;
+            stuff_to_backup[ "channels" ] = JSON.stringify( subscribed_channels );
+            stuff_to_backup[ "relays" ] = JSON.stringify( [ relay ] );
+            localStorage[ "backup" ] = JSON.stringify( stuff_to_backup );
+            showToast( "success, your account was imported" );
+        }
+    </script>
+    <script>
+        var keymap = {};
+        onkeydown = onkeyup = function(e){
+            e = e || event; // to deal with IE
+            keymap[e.key] = e.type == 'keydown';
+        }
+        function isShiftDown() {
+            if ( "Shift" in keymap ) {
+                return keymap[ "Shift" ];
+            }
+            return false;
+        }
+    </script>
+    <div class="chat">
+        <div class="sidebar">
+            <div class="search">
+                <input type="text" placeholder="Search...">
+                <i class="fa fa-search"></i>
+            </div>
+            <div class="channels">
+                <ul>
+                        <li class="manage-channels-outer" onclick="manageChannels();">
+                            <a>
+                                <span class="plus-circle fa fa-list-check"></span>
+                                <div class="manage-channels-inner">
+                                    <div class="name">Manage channels</div>
+                                    <div class="message">Find/create/remove channels</div>
+                                </div>
+                            </a>
+                        </li>
+                </ul>
+            </div>
+        </div>
+        <div class="content">
+            <div class="message-header">
+                <div class="channel-info">
+                    <span style="background-image: url('./anigma-logo.png')"></span>
+                    <!-- <span class="plus-circle">A</span> -->
+                    <div class="channel-wrapper">
+                        <div class="name">Anigma</div>
+                        <div class="message">Talk to people</div>
+                    </div>
+                </div>
+                <div class="actions">
+                    <ul>
+                        <li class="hotdog">
+                            <a>
+                                <i class="fa fa-ellipsis-v"></i>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            <div class="message-content">
+                <div class="startup-message">
+                    Please select a channel on the left. You can also go to Settings (three dots in the top right) to import a private key or backup your current keys.
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="message-header-hinder">
+    </div>
+    <div class="message-header-alt">
+    </div>
+    <script>
+        document.getElementsByClassName( "hotdog" )[ 0 ].addEventListener( "click", function() {
+            showSettings();
+        });
+    </script>
+    <script>
+        function setNoteInputHeight() {
+            setTimeout( function() {setNoteInputHeight();}, 50 );
+            if ( !document.getElementsByClassName( "note-input" )[ 0 ] ) return
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            document.getElementsByClassName( "note-input" )[ 0 ].style.height = (document.getElementsByClassName( "note-input" )[ 0 ].scrollHeight)-1+"px";
+            var text = document.getElementsByClassName( "note-input" )[ 0 ].value;
+            var match = /\r|\n/.exec(text);
+            if ( match || document.getElementsByClassName( "note-input" )[ 0 ].offsetHeight >= 40 ) {
+                document.getElementsByClassName( "note-input" )[ 0 ].style.lineHeight = "18px";
+                document.getElementsByClassName( "note-input" )[ 0 ].style.borderRadius = "10px";
+            } else if ( document.getElementsByClassName( "note-input" )[ 0 ].offsetHeight < 34 ) {
+                document.getElementsByClassName( "note-input" )[ 0 ].style.lineHeight = "35px";
+                document.getElementsByClassName( "note-input" )[ 0 ].style.borderRadius = "36px";
+            }
+        }
+        setNoteInputHeight();
+    </script>
+    <script>
+        function getUserMeta( pubkey ) {
+            if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                var i; for ( i=0; i<document.getElementsByClassName( pubkey ).length; i++ ) {
+                    if ( !document.getElementsByClassName( pubkey )[ i ].classList.contains( "removable-channel" ) ) {
+                        document.getElementsByClassName( pubkey )[ i ].parentElement.parentElement.getElementsByClassName( "picture" )[ 0 ].style.backgroundImage = "url(" + imagemap[ pubkey ] + ")";
+                    }
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( pubkey.substring( 0, 20 ) ).length; i++ ) {
+                    document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ i ].getElementsByTagName( "span" )[ 0 ].style.backgroundImage = "url(" + imagemap[ pubkey ] + ")";
+                }
+            } else if ( !( pubkey in imagemap ) ) {
+                var newsubId   = "00000001" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+                var newfilter  = { "authors": [ pubkey ], "kinds": [0], "limit": 1 }
+                var newsubmo = [ "REQ", newsubId, newfilter ]
+                socket.send(JSON.stringify( newsubmo ));
+                setTimeout( function() {
+                    var closer = [ "CLOSE", newsubId ];
+                    socket.send(JSON.stringify( closer ));
+                }, 1500 );
+            }
+            if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                var i; for ( i=0; i<document.getElementsByClassName( pubkey ).length; i++ ) {
+                    if ( !document.getElementsByClassName( pubkey )[ i ].classList.contains( "removable-channel" ) ) {
+                        document.getElementsByClassName( pubkey )[ i ].innerText = namemap[ pubkey ];
+                    }
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( pubkey.substring( 0, 20 ) ).length; i++ ) {
+                    document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ i ].getElementsByClassName( "name" )[ 0 ].innerText = namemap[ pubkey ];
+                }
+            } else if ( !( pubkey in namemap ) ) {
+                var newsubId   = "00000001" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+                var newfilter  = { "authors": [ pubkey ], "kinds": [0], "limit": 1 }
+                var newsubmo = [ "REQ", newsubId, newfilter ]
+                socket.send(JSON.stringify( newsubmo ));
+                setTimeout( function() {
+                    var closer = [ "CLOSE", newsubId ];
+                    socket.send(JSON.stringify( closer ));
+                }, 1500 );
+            }
+        }
+    </script>
+    <script>
+        function addPubkeyToSidebar( pubkey ) {
+            //check if pubkey is mapped to image
+            if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                var picture = imagemap[ pubkey ];
+            } else {
+                //var picture = "https://hashvatar.vercel.app/" + event.pubkey;
+                var picture = "https://www.gravatar.com/avatar/" + pubkey + "?s=128&d=retro";
+            }
+            //check if pubkey is mapped to name
+            if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                var name = namemap[ pubkey ];
+            } else {
+                var name = pubkey.substring( 0, 15 ) + "...";
+            }
+            var obj = {}
+            obj[ "pubkey" ] = pubkey;
+            obj[ "name" ] = name;
+            obj[ "picture" ] = picture;
+            dms_info[ pubkey ] = obj;
+            localStorage[ "dms_info" ] = JSON.stringify( dms_info );
+            getUserMeta( pubkey );
+            setTimeout( function() {
+                if ( !document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ] ) {
+                    document.getElementsByClassName( "channels" )[ 0 ].firstElementChild.innerHTML += displayDMbox( pubkey, name, picture );
+                }
+            }, 1000 );
+        }
+    </script>
+    <script>
+        function forceUpdateUserMeta( pubkey ) {
+            var newsubId   = "00000001" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+            var newfilter  = { "authors": [ pubkey ], "kinds": [0], "limit": 1 }
+            var newsubmo = [ "REQ", newsubId, newfilter ]
+            socket.send(JSON.stringify( newsubmo ));
+            setTimeout( function() {
+                var closer = [ "CLOSE", newsubId ];
+                socket.send(JSON.stringify( closer ));
+            }, 1500 );
+        }
+    </script>
+    <script>
+        async function submitUserInfo() {
+            var name = document.getElementsByClassName( "display-name" )[ 0 ].value;
+            var about = document.getElementsByClassName( "about-input" )[ 0 ].value;
+            var img = document.getElementsByClassName( "user-picture" )[ 0 ].value;
+            if ( img && img != "" && ( !img.startsWith( "https://" ) || ( !img.endsWith( ".png" ) && !img.endsWith( ".jpg" ) && !img.endsWith( ".jpeg" ) && !img.endsWith( ".gif" ) && !img.endsWith( ".webp" ) ) ) ) {
+                    showToast( "There was an error with your image url, it either did not begin with https:// or it did not end with .png, .jpg, .jpeg, .gif, or .webp" );
+                    return;
+                }
+            namemap[ pubKey ] = "none";
+            var obj = {}
+            obj[ "name" ] = name;
+            obj[ "about" ] = about;
+            obj[ "picture" ] = img;
+            var note = JSON.stringify( obj );
+            var event = {
+                "content"    : note,
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 0,
+                "tags"       : [],
+                "pubkey"     : pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, privKey);
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]));
+            setTimeout( function() {forceUpdateUserMeta( pubKey );}, 1500 );
+            showToast( "Your info was processed" );
+        }
+    </script>
+    <script>
+        function addDmsToSidebar() {
+            Object.keys(dms_info).forEach( function( pubkey ) {
+                var name = dms_info[ pubkey ][ "name" ];
+                var picture = dms_info[ pubkey ][ "picture" ];
+                if ( namemap[ pubkey ] && namemap[ pubkey ] != "none" ) {
+                    name = namemap[ pubkey ];
+                    dms_info[ pubkey ][ "name" ] = name;
+                }
+                if ( imagemap[ pubkey ] && imagemap[ pubkey ] != "none" ) {
+                    picture = imagemap[ pubkey ];
+                    dms_info[ pubkey ][ "picture" ] = picture;
+                }
+                if ( !document.getElementsByClassName( pubkey.substring( 0, 20 ) )[ 0 ] ) {
+                    document.getElementsByClassName( "channels" )[ 0 ].firstElementChild.innerHTML += displayDMbox( pubkey, name, picture );
+                }
+            });
+        }
+    </script>
+    <script>
+        function addMessageToCache( pubkey, id, event_time, parent, color, name, picture, content ) {
+            if ( !msg_cache[ parent ] ) {
+                msg_cache[ parent ] = [];
+            }
+            if ( msg_cache[ parent ].some( function( e ) {if ( Object.keys( e )[ 0 ] == id ) return e } ) ) return
+            var lower_obj = {}
+            var higher_obj = {}
+            if ( pubkey in namemap && namemap[ pubkey ] != "none" ) {
+                name = namemap[ pubkey ];
+            }
+            if ( pubkey in imagemap && imagemap[ pubkey ] != "none" ) {
+                picture = imagemap[ pubkey ];
+            }
+            lower_obj[ "pubkey" ] = pubkey;
+            lower_obj[ "id" ] = id;
+            lower_obj[ "event_time" ] = event_time;
+            lower_obj[ "parent" ] = parent;
+            lower_obj[ "color" ] = color;
+            lower_obj[ "name" ] = name;
+            lower_obj[ "picture" ] = picture;
+            lower_obj[ "content" ] = content;
+            higher_obj[ id ] = lower_obj;
+            if ( msg_cache[ parent ].length > 199 ) {
+                msg_cache[ parent ].pop();
+            }
+            msg_cache[ parent ].push( higher_obj );
+            msg_cache[ parent ].sort(
+                function( a, b ) {
+                    return b[ Object.keys( b )[ 0 ] ][ "event_time"] - a[ Object.keys( a )[ 0 ] ][ "event_time" ];
+                }
+            )
+            localStorage[ "msg_cache" ] = JSON.stringify( msg_cache );
+        }
+    </script>
+    <script>
+        function showToast( content ) {
+            var x = document.getElementById( "toast" );
+            x.innerHTML = content;
+            x.className = "show";
+            setTimeout(function(){ x.classList.remove( "show" ); }, 3000);
+        }
+    </script>
+    <div id="toast"></div>
+    <div id="black-bg" onclick="modalVanish();"></div>
+    <div id="modal"></div>
+    <script>
+        function showEmojis( start ) {
+            var emojis = ["\u{1F600}","\u{1F603}","\u{1F604}","\u{1F601}","\u{1F606}","\u{1F605}","\u{1F602}","\u{1F923}","\u{1F60A}","\u{1F607}","\u{1F642}","\u{1F643}","\u{1F609}","\u{1F60C}","\u{1F60D}","\u{1F970}","\u{1F618}","\u{1F617}","\u{1F619}","\u{1F61A}","\u{1F60B}","\u{1F61B}","\u{1F61D}","\u{1F61C}","\u{1F92A}","\u{1F928}","\u{1F9D0}","\u{1F913}","\u{1F60E}","\u{1F929}","\u{1F973}","\u{1F60F}","\u{1F612}","\u{1F61E}","\u{1F614}","\u{1F61F}","\u{1F615}","\u{1F641}","\u2639\uFE0F","\u{1F623}","\u{1F616}","\u{1F62B}","\u{1F629}","\u{1F97A}","\u{1F622}","\u{1F62D}","\u{1F624}","\u{1F620}","\u{1F621}","\u{1F92F}","\u{1F633}","\u{1F975}","\u{1F976}","\u{1F631}","\u{1F628}","\u{1F630}","\u{1F625}","\u{1F613}","\u{1F917}","\u{1F914}","\u{1F92D}","\u{1F92B}","\u{1F925}","\u{1F636}","\u{1F610}","\u{1F611}","\u{1F62C}","\u{1F644}","\u{1F62F}","\u{1F626}","\u{1F627}","\u{1F62E}","\u{1F632}","\u{1F971}","\u{1F634}","\u{1F924}","\u{1F62A}","\u{1F635}","\u{1F910}","\u{1F974}","\u{1F922}","\u{1F92E}","\u{1F927}","\u{1F637}","\u{1F912}","\u{1F915}","\u{1F911}","\u{1F920}","\u{1F608}","\u{1F47F}","\u{1F479}","\u{1F47A}","\u{1F921}","\u{1F4A9}","\u{1F47B}","\u{1F480}","\u2620\uFE0F","\u{1F47D}","\u{1F47E}","\u{1F916}","\u{1F383}","\u{1F63A}","\u{1F638}","\u{1F639}","\u{1F63B}","\u{1F63C}","\u{1F63D}","\u{1F640}","\u{1F63F}","\u{1F63E}","\u{1F44B}","\u{1F91A}","\u{1F590}","\u270B","\u{1F596}","\u{1F44C}","\u{1F90F}","\u270C\uFE0F","\u{1F91E}","\u{1F91F}","\u{1F918}","\u{1F919}","\u{1F448}","\u{1F449}","\u{1F446}","\u{1F595}","\u{1F447}","\u261D\uFE0F","\u{1F44D}","\u{1F44E}","\u270A","\u{1F44A}","\u{1F91B}","\u{1F91C}","\u{1F44F}","\u{1F64C}","\u{1F450}","\u{1F932}","\u{1F91D}","\u{1F64F}","\u270D\uFE0F","\u{1F485}","\u{1F933}","\u{1F4AA}","\u{1F9BE}","\u{1F9B5}","\u{1F9BF}","\u{1F9B6}","\u{1F463}","\u{1F442}","\u{1F9BB}","\u{1F443}","\u{1F9E0}","\u{1F9B7}","\u{1F9B4}","\u{1F440}","\u{1F445}","\u{1F444}","\u{1F48B}","\u{1FA78}","\u{1F525}","\u{1F476}","\u{1F467}","\u{1F9D2}","\u{1F466}","\u{1F469}","\u{1F9D1}","\u{1F468}","\u{1F469}\u200D\u{1F9B1}","\u{1F468}\u200D\u{1F9B1}","\u{1F469}\u200D\u{1F9B0}","\u{1F468}\u200D\u{1F9B0}","\u{1F471}\u200D\u2640\uFE0F","\u{1F471}","\u{1F471}\u200D\u2642\uFE0F","\u{1F469}\u200D\u{1F9B3}","\u{1F468}\u200D\u{1F9B3}","\u{1F469}\u200D\u{1F9B2}","\u{1F468}\u200D\u{1F9B2}","\u{1F9D4}","\u{1F475}","\u{1F9D3}","\u{1F474}","\u{1F472}","\u{1F473}\u200D\u2640\uFE0F","\u{1F473}","\u{1F473}\u200D\u2642\uFE0F","\u{1F9D5}","\u{1F46E}\u200D\u2640\uFE0F","\u{1F46E}","\u{1F46E}\u200D\u2642\uFE0F","\u{1F477}\u200D\u2640\uFE0F","\u{1F477}","\u{1F477}\u200D\u2642\uFE0F","\u{1F482}\u200D\u2640\uFE0F","\u{1F482}","\u{1F482}\u200D\u2642\uFE0F","\u{1F575}\uFE0F\u200D\u2640\uFE0F","\u{1F575}\uFE0F","\u{1F575}\uFE0F\u200D\u2642\uFE0F","\u{1F469}\u200D\u2695\uFE0F","\u{1F468}\u200D\u2695\uFE0F","\u{1F469}\u200D\u{1F33E}","\u{1F468}\u200D\u{1F33E}","\u{1F469}\u200D\u{1F373}","\u{1F468}\u200D\u{1F373}","\u{1F469}\u200D\u{1F393}","\u{1F468}\u200D\u{1F393}","\u{1F469}\u200D\u{1F3A4}","\u{1F468}\u200D\u{1F3A4}","\u{1F469}\u200D\u{1F3EB}","\u{1F468}\u200D\u{1F3EB}","\u{1F469}\u200D\u{1F3ED}","\u{1F468}\u200D\u{1F3ED}","\u{1F469}\u200D\u{1F4BB}","\u{1F468}\u200D\u{1F4BB}","\u{1F469}\u200D\u{1F4BC}","\u{1F468}\u200D\u{1F4BC}","\u{1F469}\u200D\u{1F527}","\u{1F468}\u200D\u{1F527}","\u{1F469}\u200D\u{1F52C}","\u{1F468}\u200D\u{1F52C}","\u{1F469}\u200D\u{1F3A8}","\u{1F468}\u200D\u{1F3A8}","\u{1F469}\u200D\u{1F692}","\u{1F468}\u200D\u{1F692}","\u{1F469}\u200D\u2708\uFE0F","\u{1F468}\u200D\u2708\uFE0F","\u{1F469}\u200D\u{1F680}","\u{1F468}\u200D\u{1F680}","\u{1F469}\u200D\u2696\uFE0F","\u{1F468}\u200D\u2696\uFE0F","\u{1F470}","\u{1F935}","\u{1F478}","\u{1F934}","\u{1F9B8}\u200D\u2640\uFE0F","\u{1F9B8}","\u{1F9B8}\u200D\u2642\uFE0F","\u{1F9B9}\u200D\u2640\uFE0F","\u{1F9B9}","\u{1F9B9}\u200D\u2642\uFE0F","\u{1F936}","\u{1F385}","\u{1F9D9}\u200D\u2640\uFE0F","\u{1F9D9}","\u{1F9D9}\u200D\u2642\uFE0F","\u{1F9DD}\u200D\u2640\uFE0F","\u{1F9DD}","\u{1F9DD}\u200D\u2642\uFE0F","\u{1F9DB}\u200D\u2640\uFE0F","\u{1F9DB}","\u{1F9DB}\u200D\u2642\uFE0F","\u{1F9DF}\u200D\u2640\uFE0F","\u{1F9DF}","\u{1F9DF}\u200D\u2642\uFE0F","\u{1F9DE}\u200D\u2640\uFE0F","\u{1F9DE}","\u{1F9DE}\u200D\u2642\uFE0F","\u{1F9DC}\u200D\u2640\uFE0F","\u{1F9DC}","\u{1F9DC}\u200D\u2642\uFE0F","\u{1F9DA}\u200D\u2640\uFE0F","\u{1F9DA}","\u{1F9DA}\u200D\u2642\uFE0F","\u{1F47C}","\u{1F930}","\u{1F931}","\u{1F647}\u200D\u2640\uFE0F","\u{1F647}","\u{1F647}\u200D\u2642\uFE0F","\u{1F481}\u200D\u2640\uFE0F","\u{1F481}","\u{1F481}\u200D\u2642\uFE0F","\u{1F645}\u200D\u2640\uFE0F","\u{1F645}","\u{1F645}\u200D\u2642\uFE0F","\u{1F646}\u200D\u2640\uFE0F","\u{1F646}","\u{1F646}\u200D\u2642\uFE0F","\u{1F64B}\u200D\u2640\uFE0F","\u{1F64B}","\u{1F64B}\u200D\u2642\uFE0F","\u{1F9CF}\u200D\u2640\uFE0F","\u{1F9CF}","\u{1F9CF}\u200D\u2642\uFE0F","\u{1F926}\u200D\u2640\uFE0F","\u{1F926}","\u{1F926}\u200D\u2642\uFE0F","\u{1F937}\u200D\u2640\uFE0F","\u{1F937}","\u{1F937}\u200D\u2642\uFE0F","\u{1F64E}\u200D\u2640\uFE0F","\u{1F64E}","\u{1F64E}\u200D\u2642\uFE0F","\u{1F64D}\u200D\u2640\uFE0F","\u{1F64D}","\u{1F64D}\u200D\u2642\uFE0F","\u{1F487}\u200D\u2640\uFE0F","\u{1F487}","\u{1F487}\u200D\u2642\uFE0F","\u{1F486}\u200D\u2640\uFE0F","\u{1F486}","\u{1F486}\u200D\u2642\uFE0F","\u{1F9D6}\u200D\u2640\uFE0F","\u{1F9D6}","\u{1F9D6}\u200D\u2642\uFE0F","\u{1F485}","\u{1F933}","\u{1F483}","\u{1F57A}","\u{1F46F}\u200D\u2640\uFE0F","\u{1F46F}","\u{1F46F}\u200D\u2642\uFE0F","\u{1F574}","\u{1F469}\u200D\u{1F9BD}","\u{1F9D1}\u200D\u{1F9BD}","\u{1F468}\u200D\u{1F9BD}","\u{1F469}\u200D\u{1F9BC}","\u{1F9D1}\u200D\u{1F9BC}","\u{1F468}\u200D\u{1F9BC}","\u{1F6B6}\u200D\u2640\uFE0F","\u{1F6B6}","\u{1F6B6}\u200D\u2642\uFE0F","\u{1F469}\u200D\u{1F9AF}","\u{1F9D1}\u200D\u{1F9AF}","\u{1F468}\u200D\u{1F9AF}","\u{1F9CE}\u200D\u2640\uFE0F","\u{1F9CE}","\u{1F9CE}\u200D\u2642\uFE0F","\u{1F3C3}\u200D\u2640\uFE0F","\u{1F3C3}","\u{1F3C3}\u200D\u2642\uFE0F","\u{1F9CD}\u200D\u2640\uFE0F","\u{1F9CD}","\u{1F9CD}\u200D\u2642\uFE0F","\u{1F46B}","\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F468}","\u{1F469}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}","\u{1F46A}","\u{1F468}\u200D\u{1F469}\u200D\u{1F466}","\u{1F468}\u200D\u{1F469}\u200D\u{1F467}","\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}","\u{1F468}\u200D\u{1F469}\u200D\u{1F466}\u200D\u{1F466}","\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F467}","\u{1F468}\u200D\u{1F466}","\u{1F468}\u200D\u{1F466}\u200D\u{1F466}","\u{1F468}\u200D\u{1F467}","\u{1F468}\u200D\u{1F467}\u200D\u{1F466}","\u{1F468}\u200D\u{1F467}\u200D\u{1F467}","\u{1F469}\u200D\u{1F466}","\u{1F469}\u200D\u{1F466}\u200D\u{1F466}","\u{1F469}\u200D\u{1F467}","\u{1F469}\u200D\u{1F467}\u200D\u{1F466}","\u{1F469}\u200D\u{1F467}\u200D\u{1F467}","\u{1F5E3}","\u{1F464}","\u{1F465}","\u{1F302}","\u2602\uFE0F","\u{1F9F5}","\u{1FAA1}","\u{1FAA2}","\u{1F9F6}","\u{1F453}","\u{1F576}","\u{1F97D}","\u{1F97C}","\u{1F9BA}","\u{1F454}","\u{1F455}","\u{1F456}","\u{1F9E3}","\u{1F9E4}","\u{1F9E5}","\u{1F9E6}","\u{1F457}","\u{1F458}","\u{1F97B}","\u{1FA71}","\u{1FA72}","\u{1FA73}","\u{1F459}","\u{1F45A}","\u{1F45B}","\u{1F45C}","\u{1F45D}","\u{1F392}","\u{1F45E}","\u{1F45F}","\u{1F97E}","\u{1F97F}","\u{1F460}","\u{1F461}","\u{1FA70}","\u{1F462}","\u{1F451}","\u{1F452}","\u{1F3A9}","\u{1F393}","\u{1F9E2}","\u{1F484}","\u{1F48D}","\u{1F4BC}","\u{1F44B}\u{1F3FB}","\u{1F91A}\u{1F3FB}","\u{1F590}\u{1F3FB}","\u270B\u{1F3FB}","\u{1F596}\u{1F3FB}","\u{1F44C}\u{1F3FB}","\u{1F90F}\u{1F3FB}","\u270C\u{1F3FB}","\u{1F91E}\u{1F3FB}","\u{1F91F}\u{1F3FB}","\u{1F918}\u{1F3FB}","\u{1F919}\u{1F3FB}","\u{1F448}\u{1F3FB}","\u{1F449}\u{1F3FB}","\u{1F446}\u{1F3FB}","\u{1F595}\u{1F3FB}","\u{1F447}\u{1F3FB}","\u261D\u{1F3FB}","\u{1F44D}\u{1F3FB}","\u{1F44E}\u{1F3FB}","\u270A\u{1F3FB}","\u{1F44A}\u{1F3FB}","\u{1F91B}\u{1F3FB}","\u{1F91C}\u{1F3FB}","\u{1F44F}\u{1F3FB}","\u{1F64C}\u{1F3FB}","\u{1F450}\u{1F3FB}","\u{1F932}\u{1F3FB}","\u{1F64F}\u{1F3FB}","\u270D\u{1F3FB}","\u{1F485}\u{1F3FB}","\u{1F933}\u{1F3FB}","\u{1F4AA}\u{1F3FB}","\u{1F9B5}\u{1F3FB}","\u{1F9B6}\u{1F3FB}","\u{1F442}\u{1F3FB}","\u{1F9BB}\u{1F3FB}","\u{1F443}\u{1F3FB}","\u{1F476}\u{1F3FB}","\u{1F467}\u{1F3FB}","\u{1F9D2}\u{1F3FB}","\u{1F466}\u{1F3FB}","\u{1F469}\u{1F3FB}","\u{1F9D1}\u{1F3FB}","\u{1F468}\u{1F3FB}","\u{1F469}\u{1F3FB}\u200D\u{1F9B1}","\u{1F468}\u{1F3FB}\u200D\u{1F9B1}","\u{1F469}\u{1F3FB}\u200D\u{1F9B0}","\u{1F468}\u{1F3FB}\u200D\u{1F9B0}","\u{1F471}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F471}\u{1F3FB}","\u{1F471}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F469}\u{1F3FB}\u200D\u{1F9B3}","\u{1F468}\u{1F3FB}\u200D\u{1F9B3}","\u{1F469}\u{1F3FB}\u200D\u{1F9B2}","\u{1F468}\u{1F3FB}\u200D\u{1F9B2}","\u{1F9D4}\u{1F3FB}","\u{1F475}\u{1F3FB}","\u{1F9D3}\u{1F3FB}","\u{1F474}\u{1F3FB}","\u{1F472}\u{1F3FB}","\u{1F473}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F473}\u{1F3FB}","\u{1F473}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F9D5}\u{1F3FB}","\u{1F46E}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F46E}\u{1F3FB}","\u{1F46E}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F477}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F477}\u{1F3FB}","\u{1F477}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F482}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F482}\u{1F3FB}","\u{1F482}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F575}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F575}\u{1F3FB}","\u{1F575}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F469}\u{1F3FB}\u200D\u2695\uFE0F","\u{1F647}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F647}\u{1F3FB}","\u{1F647}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F481}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F481}\u{1F3FB}","\u{1F481}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F645}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F645}\u{1F3FB}","\u{1F645}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F646}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F646}\u{1F3FB}","\u{1F646}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F64B}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F64B}\u{1F3FB}","\u{1F64B}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F9CF}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9CF}\u{1F3FB}","\u{1F9CF}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F926}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F926}\u{1F3FB}","\u{1F926}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F937}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F937}\u{1F3FB}","\u{1F937}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F64E}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F64E}\u{1F3FB}","\u{1F64E}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F64D}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F64D}\u{1F3FB}","\u{1F64D}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F487}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F487}\u{1F3FB}","\u{1F487}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F486}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F486}\u{1F3FB}","\u{1F486}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F9D6}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9D6}\u{1F3FB}","\u{1F9D6}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F483}\u{1F3FB}","\u{1F57A}\u{1F3FB}","\u{1F574}\u{1F3FB}","\u{1F469}\u{1F3FB}\u200D\u{1F9BD}","\u{1F468}\u{1F3FB}\u200D\u{1F9BD}","\u{1F469}\u{1F3FB}\u200D\u{1F9BC}","\u{1F468}\u{1F3FB}\u200D\u{1F9BC}","\u{1F6B6}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F6B6}\u{1F3FB}","\u{1F6B6}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F469}\u{1F3FB}\u200D\u{1F9AF}","\u{1F468}\u{1F3FB}\u200D\u{1F9AF}","\u{1F9CE}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9CE}\u{1F3FB}","\u{1F9CE}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F3C3}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F3C3}\u{1F3FB}","\u{1F3C3}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F9CD}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9CD}\u{1F3FB}","\u{1F9CD}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F46D}\u{1F3FB}","\u{1F9D1}\u{1F3FB}\u200D\u{1F91D}\u200D\u{1F9D1}\u{1F3FB}","\u{1F46C}\u{1F3FB}","\u{1F46B}\u{1F3FB}","\u{1F9D7}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9D7}\u{1F3FB}","\u{1F9D7}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F3C7}\u{1F3FB}","\u{1F3C2}\u{1F3FB}","\u{1F3CC}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F3CC}\u{1F3FB}","\u{1F3CC}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F3C4}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F3C4}\u{1F3FB}","\u{1F3C4}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F6A3}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F6A3}\u{1F3FB}","\u{1F6A3}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F3CA}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F3CA}\u{1F3FB}","\u{1F3CA}\u{1F3FB}\u200D\u2642\uFE0F","\u26F9\u{1F3FB}\u200D\u2640\uFE0F","\u26F9\u{1F3FB}","\u26F9\u{1F3FB}\u200D\u2642\uFE0F","\u{1F3CB}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F3CB}\u{1F3FB}","\u{1F3CB}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F6B4}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F6B4}\u{1F3FB}","\u{1F6B4}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F6B5}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F6B5}\u{1F3FB}","\u{1F6B5}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F938}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F938}\u{1F3FB}","\u{1F938}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F93D}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F93D}\u{1F3FB}","\u{1F93D}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F93E}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F93E}\u{1F3FB}","\u{1F93E}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F939}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F939}\u{1F3FB}","\u{1F939}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F9D8}\u{1F3FB}\u200D\u2640\uFE0F","\u{1F9D8}\u{1F3FB}","\u{1F9D8}\u{1F3FB}\u200D\u2642\uFE0F","\u{1F6C0}\u{1F3FB}","\u{1F6CC}\u{1F3FB}","\u{1F34F}","\u{1F34E}","\u{1F350}","\u{1F34A}","\u{1F34B}","\u{1F34C}","\u{1F349}","\u{1F347}","\u{1F353}","\u{1F348}","\u{1F352}","\u{1F351}","\u{1F96D}","\u{1F34D}","\u{1F965}","\u{1F95D}","\u{1F345}","\u{1F346}","\u{1F951}","\u{1F966}","\u{1F96C}","\u{1F952}","\u{1F336}","\u{1F33D}","\u{1F955}","\u{1F9C4}","\u{1F9C5}","\u{1F954}","\u{1F360}","\u{1F950}","\u{1F96F}","\u{1F35E}","\u{1F956}","\u{1F968}","\u{1F9C0}","\u{1F95A}","\u{1F373}","\u{1F9C8}","\u{1F95E}","\u{1F9C7}","\u{1F953}","\u{1F969}","\u{1F357}","\u{1F356}","\u{1F9B4}","\u{1F32D}","\u{1F354}","\u{1F35F}","\u{1F355}","\u{1F96A}","\u{1F959}","\u{1F9C6}","\u{1F32E}","\u{1F32F}","\u{1F957}","\u{1F958}","\u{1F96B}","\u{1F35D}","\u{1F35C}","\u{1F372}","\u{1F35B}","\u{1F363}","\u{1F371}","\u{1F95F}","\u{1F9AA}","\u{1F364}","\u{1F359}","\u{1F35A}","\u{1F358}","\u{1F365}","\u{1F960}","\u{1F96E}","\u{1F362}","\u{1F361}","\u{1F367}","\u{1F368}","\u{1F366}","\u{1F967}","\u{1F9C1}","\u{1F370}","\u{1F382}","\u{1F36E}","\u{1F36D}","\u{1F36C}","\u{1F36B}","\u{1F37F}","\u{1F369}","\u{1F36A}","\u{1F330}","\u{1F95C}","\u{1F36F}","\u{1F95B}","\u{1F37C}","\u2615\uFE0F","\u{1F375}","\u{1F9C3}","\u{1F964}","\u{1F9CB}","\u{1F376}","\u{1F37A}","\u{1F37B}","\u{1F942}","\u{1F377}","\u{1F943}","\u{1F378}","\u{1F379}","\u{1F9C9}","\u{1F37E}","\u{1F9CA}","\u{1F944}","\u{1F374}","\u{1F37D}","\u{1F963}","\u{1F961}","\u{1F962}","\u{1F9C2}","\u2764\uFE0F","\u{1F9E1}","\u{1F49B}","\u{1F49A}","\u{1F499}","\u{1F49C}","\u{1F5A4}","\u{1F90D}","\u{1F90E}","\u{1F494}","\u2763\uFE0F","\u{1F495}","\u{1F49E}","\u{1F493}","\u{1F497}","\u{1F496}","\u{1F498}","\u{1F49D}","\u{1F49F}","\u262E\uFE0F","\u271D\uFE0F","\u262A\uFE0F","\u{1F549}","\u2638\uFE0F","\u2721\uFE0F","\u{1F52F}","\u{1F54E}","\u262F\uFE0F","\u2626\uFE0F","\u{1F6D0}","\u26CE","\u2648\uFE0F","\u2649\uFE0F","\u264A\uFE0F","\u264B\uFE0F","\u264C\uFE0F","\u264D\uFE0F","\u264E\uFE0F","\u264F\uFE0F","\u2650\uFE0F","\u2651\uFE0F","\u2652\uFE0F","\u2653\uFE0F","\u{1F194}","\u269B\uFE0F","\u{1F251}","\u2622\uFE0F","\u2623\uFE0F","\u{1F4F4}","\u{1F4F3}","\u{1F236}","\u{1F21A}\uFE0F","\u{1F238}","\u{1F23A}","\u{1F237}\uFE0F","\u2734\uFE0F","\u{1F19A}","\u{1F4AE}","\u{1F250}","\u3299\uFE0F","\u3297\uFE0F","\u{1F234}","\u{1F235}","\u{1F239}","\u{1F232}","\u{1F170}\uFE0F","\u{1F171}\uFE0F","\u{1F18E}","\u{1F191}","\u{1F17E}\uFE0F","\u{1F198}","\u274C","\u2B55\uFE0F","\u{1F6D1}","\u26D4\uFE0F","\u{1F4DB}","\u{1F6AB}","\u{1F4AF}","\u{1F4A2}","\u2668\uFE0F","\u{1F6B7}","\u{1F6AF}","\u{1F6B3}","\u{1F6B1}","\u{1F51E}","\u{1F4F5}","\u{1F6AD}","\u2757\uFE0F","\u2755","\u2753","\u2754","\u203C\uFE0F","\u2049\uFE0F","\u{1F505}","\u{1F506}","\u303D\uFE0F","\u26A0\uFE0F","\u{1F6B8}","\u{1F531}","\u269C\uFE0F","\u{1F530}","\u267B\uFE0F","\u2705","\u{1F22F}\uFE0F","\u{1F4B9}","\u2747\uFE0F","\u2733\uFE0F","\u274E","\u{1F310}","\u{1F4A0}","\u24C2\uFE0F","\u{1F300}","\u{1F4A4}","\u{1F3E7}","\u{1F6BE}","\u267F\uFE0F","\u{1F17F}\uFE0F","\u{1F233}","\u{1F202}\uFE0F","\u{1F6C2}","\u{1F6C3}","\u{1F6C4}","\u{1F6C5}","\u{1F6B9}","\u{1F6BA}","\u{1F6BC}","\u26A7","\u{1F6BB}","\u{1F6AE}","\u{1F3A6}","\u{1F4F6}","\u{1F201}","\u{1F523}","\u{1F524}","\u{1F521}","\u{1F520}","\u{1F196}","\u{1F197}","\u{1F199}","\u{1F192}","\u{1F195}","\u{1F193}","0\uFE0F\u20E3","1\uFE0F\u20E3","2\uFE0F\u20E3","3\uFE0F\u20E3","4\uFE0F\u20E3","5\uFE0F\u20E3","6\uFE0F\u20E3","7\uFE0F\u20E3","8\uFE0F\u20E3","9\uFE0F\u20E3","\u{1F51F}","\u{1F522}","#\uFE0F\u20E3","*\uFE0F\u20E3","\u23CF\uFE0F","\u25B6\uFE0F","\u23F8","\u23EF","\u23F9","\u23FA","\u23ED","\u23EE","\u23E9","\u23EA","\u23EB","\u23EC","\u25C0\uFE0F","\u{1F53C}","\u{1F53D}","\u27A1\uFE0F","\u2B05\uFE0F","\u2B06\uFE0F","\u2B07\uFE0F","\u2197\uFE0F","\u2198\uFE0F","\u2199\uFE0F","\u2196\uFE0F","\u2195\uFE0F","\u2194\uFE0F","\u21AA\uFE0F","\u21A9\uFE0F","\u2934\uFE0F","\u2935\uFE0F","\u{1F500}","\u{1F501}","\u{1F502}","\u{1F504}","\u{1F503}","\u{1F3B5}","\u{1F3B6}","\u2795","\u2796","\u2797","\u2716\uFE0F","\u{1F4B2}","\u{1F4B1}","\u3030\uFE0F","\u27BF","\u{1F51A}","\u{1F519}","\u{1F51B}","\u{1F51D}","\u{1F51C}","\u2714\uFE0F","\u2611\uFE0F","\u{1F518}","\u{1F534}","\u{1F7E0}","\u{1F7E1}","\u{1F7E2}","\u{1F535}","\u{1F7E3}","\u26AB\uFE0F","\u26AA\uFE0F","\u{1F7E4}","\u{1F53A}","\u{1F53B}","\u{1F538}","\u{1F539}","\u{1F536}","\u{1F537}","\u{1F533}","\u{1F532}","\u{1F7E5}","\u{1F7E7}","\u{1F7E8}","\u{1F7E9}","\u{1F7E6}","\u{1F7EA}","\u2B1B\uFE0F","\u2B1C\uFE0F","\u{1F7EB}","\u{1F508}","\u{1F507}","\u{1F509}","\u{1F50A}","\u{1F514}","\u{1F515}","\u{1F4E3}","\u{1F4E2}","\u{1F441}\u200D\u{1F5E8}","\u{1F4AC}","\u{1F4AD}","\u{1F0CF}","\u{1F3B4}","\u{1F004}\uFE0F","\u{1F550}","\u{1F551}","\u{1F552}","\u{1F553}","\u{1F554}","\u{1F555}","\u{1F556}","\u{1F557}","\u{1F558}","\u{1F559}","\u{1F55A}","\u{1F55B}","\u{1F55C}","\u{1F55D}","\u{1F55E}","\u{1F55F}","\u{1F560}","\u{1F561}","\u{1F562}","\u{1F563}","\u{1F564}","\u{1F565}","\u{1F566}","\u{1F567}"];
+            document.getElementById( "modal" ).innerHTML = "";
+            var i = start; for ( ; i<start + 49; i++ ) {
+                var html = `<a class="emoji-in-modal" onclick="selectEmoji( '${emojis[ i ]}' )">${emojis[ i ]}</a>`
+                document.getElementById( "modal" ).innerHTML += html;
+            }
+            document.getElementById( "modal" ).innerHTML += '<div id="modal-btns"></div>'
+            var backStyle = "";
+            var backClick = "";
+            var fwdStyle = "";
+            var fwdClick = "";
+            if ( i == 49 ) {
+                backStyle = `style="background-color: #999"`;
+            } else {
+                backClick = `onclick="showEmojis( ${i - 98} )"`;
+            }
+            if ( i == 980 ) {
+                fwdStyle = `style="background-color: #999"`;
+            } else {
+                fwdClick = `onclick="showEmojis( ${i} )"`;
+            }
+            var btns = `<button class="modal-btn" ${backStyle} ${backClick}>Back</button><button class="modal-btn" ${fwdStyle} ${fwdClick}>Next</button>`
+            document.getElementById( "modal-btns" ).innerHTML = btns;
+            document.getElementById( "black-bg" ).style.display = "block";
+            document.getElementById( "modal" ).style.display = "block";
+        }
+        function selectEmoji( emoji ) {
+            document.getElementsByClassName( "message-form" )[ 0 ].getElementsByTagName( "textarea" )[ 0 ].value += emoji;
+            modalVanish();
+        }
+        function modalVanish() {
+            document.getElementById( "black-bg" ).style.display = "none";
+            document.getElementById( "modal" ).style.display = "none";
+        }
+    </script>
+</body>
+</html>
